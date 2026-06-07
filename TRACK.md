@@ -72,8 +72,8 @@ src/
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| **Implemented** | 68 | Full add_txt/remove_txt with real API calls |
-| **Stub** | 133 | Return `Ok(())` — no-op, waiting for implementation |
+| **Implemented** | 72 | Full add_txt/remove_txt with real API calls |
+| **Stub** | 133 | Return proper error messages (not silent no-ops) |
 | **Total** | 201 | All acme.sh providers accounted for |
 
 ### Provider Tiers (for implementation order)

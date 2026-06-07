@@ -1,16 +1,14 @@
-mod acme;
-mod base64;
-mod cli;
-mod config;
-mod crypto;
-mod error;
-mod http;
-mod json;
-mod providers;
-
 use std::collections::HashMap;
 
-use error::Error;
+use acmers::acme;
+use acmers::base64;
+use acmers::cli;
+use acmers::config;
+use acmers::crypto;
+use acmers::error::Error;
+use acmers::http;
+use acmers::json;
+use acmers::providers;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
