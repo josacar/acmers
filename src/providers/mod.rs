@@ -338,7 +338,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "miab", name: "Miab", env_vars: &["MIAB_Username", "MIAB_Password", "MIAB_Server"], create: |env| miab::Miab::new(env) },
     ProviderMeta { slug: "mijnhost", name: "Mijnhost", env_vars: &["MIJNHOST_API_KEY"], create: |env| mijnhost::Mijnhost::new(env) },
     ProviderMeta { slug: "misaka", name: "Misaka", env_vars: &["MISAKA_Key", "MISAKA_Secret"], create: |env| misaka::Misaka::new(env) },
-    ProviderMeta { slug: "myapi", name: "Myapi", env_vars: &["MYAPI_Token"], create: |env| myapi::Myapi::new(env) },
+    ProviderMeta { slug: "myapi", name: "Myapi", env_vars: &["MYAPI_Token", "MYAPI_Endpoint"], create: |env| myapi::Myapi::new(env) },
     ProviderMeta { slug: "mydevil", name: "Mydevil", env_vars: &["MYDEVIL_Username", "MYDEVIL_Password"], create: |env| mydevil::Mydevil::new(env) },
     ProviderMeta { slug: "mydnsjp", name: "Mydnsjp", env_vars: &["MYDNSJP_MasterID", "MYDNSJP_MasterPassword"], create: |env| mydnsjp::Mydnsjp::new(env) },
     ProviderMeta { slug: "myloc", name: "Myloc", env_vars: &["MYLOC_User", "MYLOC_Password"], create: |env| myloc::Myloc::new(env) },
