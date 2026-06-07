@@ -72,8 +72,8 @@ src/
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| **Implemented** | 1 | Cloudflare (full add_txt/remove_txt) |
-| **Stub** | 200 | Return `Ok(())` — no-op, waiting for implementation |
+| **Implemented** | 56 | Full add_txt/remove_txt with real API calls |
+| **Stub** | 145 | Return `Ok(())` — no-op, waiting for implementation |
 | **Total** | 201 | All acme.sh providers accounted for |
 
 ### Provider Tiers (for implementation order)
@@ -125,13 +125,13 @@ Examples:
 - [x] Static registry with all providers
 - [ ] Implement Batch 1: Simple REST providers (~85)
 
-### Sprint 3 — Remaining Providers
+### ### Sprint 3 — Remaining Providers
 - [ ] Implement Batch 2: XML-RPC/SOAP providers (~8)
 - [ ] Implement Batch 3: Login+scrape providers (~5)
 - [ ] Implement Batch 4: DNS protocol providers (~4)
 - [ ] Implement Batch 5: Custom providers (~28)
 
-### Sprint 4 — Polish
+### ### Sprint 4 — Polish
 - [ ] Standalone modes (HTTP-01, TLS-ALPN-01)
 - [ ] Deploy hooks (`--install-cert --reloadcmd`)
 - [ ] Notification system (email, webhook)
