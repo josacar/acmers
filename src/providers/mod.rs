@@ -273,7 +273,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "duckdns", name: "Duckdns", env_vars: &["DuckDNS_Token"], create: |env| duckdns::Duckdns::new(env) },
     ProviderMeta { slug: "durabledns", name: "Durabledns", env_vars: &["DURABLEDNS_User", "DURABLEDNS_Key"], create: |env| durabledns::Durabledns::new(env) },
     ProviderMeta { slug: "dyn", name: "Dyn", env_vars: &["DYN_Customer", "DYN_Username", "DYN_Password"], create: |env| r#dyn::Dyn::new(env) },
-    ProviderMeta { slug: "dynadot", name: "Dynadot", env_vars: &["DYNADOT_Key", "DYNADOT_Secret"], create: |env| dynadot::Dynadot::new(env) },
+    ProviderMeta { slug: "dynadot", name: "Dynadot", env_vars: &["DYNADOT_Key"], create: |env| dynadot::Dynadot::new(env) },
     ProviderMeta { slug: "dynu", name: "Dynu", env_vars: &["Dynu_ClientId", "Dynu_Secret"], create: |env| dynu::Dynu::new(env) },
     ProviderMeta { slug: "dynv6", name: "Dynv6", env_vars: &["DYNV6_TOKEN"], create: |env| dynv6::Dynv6::new(env) },
     ProviderMeta { slug: "easydns", name: "Easydns", env_vars: &["EASYDNS_Username", "EASYDNS_Password", "EASYDNS_APIKey"], create: |env| easydns::Easydns::new(env) },
