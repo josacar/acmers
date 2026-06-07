@@ -243,7 +243,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "azure", name: "Azure", env_vars: &["AZUREDNS_SUBSCRIPTIONID", "AZUREDNS_TENANTID", "AZUREDNS_APPID", "AZUREDNS_CLIENTSECRET"], create: |env| azure::Azure::new(env) },
     ProviderMeta { slug: "baidu", name: "Baidu", env_vars: &["BAIDU_Key", "BAIDU_Secret"], create: |env| baidu::Baidu::new(env) },
     ProviderMeta { slug: "beget", name: "Beget", env_vars: &["BEGET_USERNAME", "BEGET_PASSWORD"], create: |env| beget::Beget::new(env) },
-    ProviderMeta { slug: "bh", name: "Bh", env_vars: &["BH_Key", "BH_Secret"], create: |env| bh::Bh::new(env) },
+    ProviderMeta { slug: "bh", name: "Bluehost", env_vars: &["BH_Key", "BH_Secret"], create: |env| bh::Bluehost::new(env) },
     ProviderMeta { slug: "bhosted", name: "Bhosted", env_vars: &["BHOSTED_Key"], create: |env| bhosted::Bhosted::new(env) },
     ProviderMeta { slug: "bookmyname", name: "Bookmyname", env_vars: &["BOOKMYNAME_Username", "BOOKMYNAME_Password"], create: |env| bookmyname::Bookmyname::new(env) },
     ProviderMeta { slug: "bunny", name: "Bunny", env_vars: &["BUNNY_API_KEY"], create: |env| bunny::Bunny::new(env) },
