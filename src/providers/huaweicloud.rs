@@ -1,0 +1,28 @@
+use std::collections::HashMap;
+
+use crate::error::Error;
+use crate::providers::{DnsProvider, ProviderResult};
+
+pub struct Huaweicloud;
+
+impl DnsProvider for Huaweicloud {
+    fn slug() -> &'static str {
+        "huaweicloud"
+    }
+
+    fn env_vars() -> &'static [&'static str] {
+        &["HUAWEICLOUD_AccessKeyID", "HUAWEICLOUD_SecretAccessKey", "HUAWEICLOUD_Region"]
+    }
+
+    fn new(_env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
+        Ok(Box::new(Huaweicloud))
+    }
+
+    fn add_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
+        Ok(())
+    }
+
+    fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
+        Ok(())
+    }
+}

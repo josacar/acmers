@@ -1,0 +1,201 @@
+use serde_json::Value;
+
+use crate::crypto::{AccountKey, KidOrJwk, sign_jws};
+use crate::error::Error;
+use crate::http;
+use crate::json as j;
+
+pub struct Order {
+    pub url: String,
+    pub status: String,
+    pub expires: Option<String>,
+    pub identifiers: Vec<String>,
+    pub authorizations: Vec<String>,
+    pub finalize: String,
+    pub certificate: Option<String>,
+}
+
+pub fn create_order(
+    domains: &[String],
+    account_url: &str,
+    new_order_url: &str,
+    key: &AccountKey,
+    nonce: &str,
+) -> Result<Order, Error> {
+    let identifiers: Vec<Value> = domains.iter()
+        .map(|d| serde_json::json!({"type": "dns", "value": d}))
+        .collect();
+
+    let payload = serde_json::json!({"identifiers": identifiers});
+
+    let jws = sign_jws(
+        &serde_json::to_vec(&payload).unwrap(),
+        &key.key_pair,
+        &KidOrJwk::Kid(account_url.to_string()),
+        nonce,
+        new_order_url,
+    )?;
+
+    let resp = http::post(
+        new_order_url,
+        &serde_json::to_vec(&jws).unwrap(),
+        "application/jose+json",
+        &[],
+    )
+    .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+
+    let v: Value = serde_json::from_str(&resp.body)
+        .map_err(|e| Error::Json(format!("parse order: {e}")))?;
+
+    let order_url = j::get_string(&v, &["url"])
+        .or_else(|| resp.headers.get("location").map(|s| s.as_str()))
+        .unwrap_or("")
+        .to_string();
+
+    let status = j::get_string_required(&v, &["status"])?.to_string();
+    let auths = j::get_array_required(&v, &["authorizations"])?;
+    let finalize = j::get_string_required(&v, &["finalize"])?.to_string();
+    let cert = j::get_string(&v, &["certificate"]).map(|s| s.to_string());
+
+    let identifiers_list = j::get_array(&v, &["identifiers"])
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|id| j::get_string(id, &["value"]))
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(Order {
+        url: order_url,
+        status,
+        expires: j::get_string(&v, &["expires"]).map(|s| s.to_string()),
+        identifiers: identifiers_list,
+        authorizations: auths.iter().filter_map(|a| a.as_str().map(|s| s.to_string())).collect(),
+        finalize,
+        certificate: cert,
+    })
+}
+
+pub fn finalize_order(
+    csr_der: &[u8],
+    finalize_url: &str,
+    account_url: &str,
+    key: &AccountKey,
+    get_nonce: &mut dyn FnMut() -> Result<String, Error>,
+) -> Result<String, Error> {
+    let csr_b64 = crate::base64::encode_no_pad(csr_der);
+    let payload = serde_json::json!({"csr": csr_b64});
+
+    let nonce = get_nonce()?;
+    let jws = sign_jws(
+        &serde_json::to_vec(&payload).unwrap(),
+        &key.key_pair,
+        &KidOrJwk::Kid(account_url.to_string()),
+        &nonce,
+        finalize_url,
+    )?;
+
+    let resp = http::post(
+        finalize_url,
+        &serde_json::to_vec(&jws).unwrap(),
+        "application/jose+json",
+        &[],
+    )
+    .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+
+    let v: Value = serde_json::from_str(&resp.body)
+        .map_err(|e| Error::Json(format!("parse finalize: {e}")))?;
+
+    let status = j::get_string_required(&v, &["status"])?;
+    if status == "invalid" {
+        let err = j::get_string(&v, &["error", "detail"]).unwrap_or("finalize failed");
+        return Err(Error::Acme {
+            status: resp.status,
+            detail: err.to_string(),
+            error_type: "finalize_failed".into(),
+        });
+    }
+
+    let order_url = j::get_string(&v, &["url"])
+        .or_else(|| resp.headers.get("location").map(|s| s.as_str()))
+        .unwrap_or(finalize_url)
+        .to_string();
+
+    poll_order(&order_url, account_url, key, get_nonce)
+}
+
+pub fn poll_order(
+    order_url: &str,
+    account_url: &str,
+    key: &AccountKey,
+    get_nonce: &mut dyn FnMut() -> Result<String, Error>,
+) -> Result<String, Error> {
+    for _ in 0..60 {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let nonce = get_nonce()?;
+        let jws = sign_jws(
+            b"",
+            &key.key_pair,
+            &KidOrJwk::Kid(account_url.to_string()),
+            &nonce,
+            order_url,
+        )?;
+        let resp = http::post(
+            order_url,
+            &serde_json::to_vec(&jws).unwrap(),
+            "application/jose+json",
+            &[],
+        )
+        .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+
+        let v: Value = serde_json::from_str(&resp.body)
+            .map_err(|e| Error::Json(format!("parse order poll: {e}")))?;
+
+        let status = j::get_string_required(&v, &["status"])?;
+        match status {
+            "valid" => {
+                let cert_url = j::get_string_required(&v, &["certificate"])?;
+                return Ok(cert_url.to_string());
+            }
+            "invalid" => {
+                let err = j::get_string(&v, &["error", "detail"]).unwrap_or("order invalid");
+                return Err(Error::Acme {
+                    status: resp.status,
+                    detail: err.to_string(),
+                    error_type: "order_failed".into(),
+                });
+            }
+            _ => continue,
+        }
+    }
+    Err(Error::Acme {
+        status: 0,
+        detail: "timed out waiting for order finalization".into(),
+        error_type: "timeout".into(),
+    })
+}
+
+pub fn download_cert(
+    cert_url: &str,
+    account_url: &str,
+    key: &AccountKey,
+    get_nonce: &mut dyn FnMut() -> Result<String, Error>,
+) -> Result<String, Error> {
+    let nonce = get_nonce()?;
+    let jws = sign_jws(
+        b"",
+        &key.key_pair,
+        &KidOrJwk::Kid(account_url.to_string()),
+        &nonce,
+        cert_url,
+    )?;
+    let resp = http::post(
+        cert_url,
+        &serde_json::to_vec(&jws).unwrap(),
+        "application/jose+json",
+        &[],
+    )
+    .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+    Ok(resp.body)
+}

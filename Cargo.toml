@@ -1,0 +1,16 @@
+[package]
+name = "acmers"
+version = "0.1.0"
+edition = "2024"
+description = "Zero-dependency ACME client with DNS-01 challenge support for 165+ providers"
+license = "MIT"
+
+[dependencies]
+ureq = "3"
+serde_json = "1"
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }
+ring = "0.17"
+lexopt = "0.3"
+time = "0.3"
+x509-parser = "0.18"
+rustls-pki-types = "1"
