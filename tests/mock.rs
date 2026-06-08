@@ -43,9 +43,11 @@ impl MockServer {
                                 response.push_str("Content-Type: application/json\r\n");
                             }
                             response.push_str(&format!("Content-Length: {}\r\n", resp_body.len()));
+                            response.push_str("Connection: close\r\n");
                             response.push_str("\r\n");
                             response.push_str(&resp_body);
                             let _ = stream.write_all(response.as_bytes());
+                            let _ = stream.flush();
                         }
                     }
                     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
