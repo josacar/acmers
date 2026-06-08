@@ -111,16 +111,24 @@ impl Cloudflare {
             }
         }
 
-        let search_url = format!("https://api.cloudflare.com/client/v4/zones?name={domain}");
-        let resp = http::get(&search_url, &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("CF search zones: {e}")))?;
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("CF zones response: {e}")))?;
-        if let Some(zones) = v.get("result").and_then(|r| r.as_array()) {
-            if let Some(z) = zones.first() {
-                if let Some(id) = z.get("id").and_then(|i| i.as_str()) {
-                    return Ok(id.to_string());
+        let mut search = domain.to_string();
+        loop {
+            let search_url = format!("https://api.cloudflare.com/client/v4/zones?name={search}");
+            let resp = http::get(&search_url, &[("Authorization", &auth)])
+                .map_err(|e| Error::Provider(format!("CF search zones: {e}")))?;
+            let v: Value = serde_json::from_str(&resp.body)
+                .map_err(|e| Error::Json(format!("CF zones response: {e}")))?;
+            if let Some(zones) = v.get("result").and_then(|r| r.as_array()) {
+                if let Some(z) = zones.first() {
+                    if let Some(id) = z.get("id").and_then(|i| i.as_str()) {
+                        return Ok(id.to_string());
+                    }
                 }
+            }
+            if let Some(pos) = search.find('.') {
+                search = search[pos + 1..].to_string();
+            } else {
+                break;
             }
         }
 
