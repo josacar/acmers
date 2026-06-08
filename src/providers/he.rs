@@ -29,91 +29,16 @@ impl DnsProvider for He {
         }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let cookies = self.login()?;
-        self.find_zone_id(domain, &cookies)?;
-
-        let headers: &[(&str, &str)] = &[("Cookie", &cookies)];
-
-        let zone_page_url = format!("https://dns.he.net/?host={domain}");
-        let resp = http::get(&zone_page_url, headers)
-            .map_err(|e| Error::Provider(format!("HE zone page: {e}")))?;
-        let body = &resp.body;
-
-        let account = extract_value(body, "name=\"account\" value=\"", "\"")
-            .ok_or_else(|| Error::Provider("HE: could not find account token".into()))?;
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let zone_id = self.find_zone(name)?;
 
         let form = format!(
-            "account={}&host={}&type=TXT&name={}&value={}&ttl=300&submit=Save",
-            url_encode_f(&account),
-            url_encode_f(domain),
-            url_encode_f(name),
-            url_encode_f(value),
-        );
-        let post_resp = http::post(
-            &zone_page_url,
-            form.as_bytes(),
-            "application/x-www-form-urlencoded",
-            headers,
-        )
-        .map_err(|e| Error::Provider(format!("HE add TXT: {e}")))?;
-        if post_resp.status >= 400 {
-            return Err(Error::Provider(format!("HE add TXT: HTTP {}", post_resp.status)));
-        }
-        Ok(())
-    }
-
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
-        let cookies = match self.login() {
-            Ok(c) => c,
-            Err(_) => return Ok(()),
-        };
-        if self.find_zone_id(domain, &cookies).is_err() {
-            return Ok(());
-        }
-
-        let headers: &[(&str, &str)] = &[("Cookie", &cookies)];
-        let zone_page_url = format!("https://dns.he.net/?host={domain}");
-        let resp = match http::get(&zone_page_url, headers) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-
-        let body = &resp.body;
-        let account = match extract_value(body, "name=\"account\" value=\"", "\"") {
-            Some(a) => a,
-            None => return Ok(()),
-        };
-
-        let del_marker = format!("name={name}&type=TXT");
-        if let Some(block) = find_block_before(body, &del_marker, "<tr") {
-            if let Some(del_id) = extract_value(&block, "data-del=\"", "\"") {
-                let del_form = format!(
-                    "account={}&host={}&data_del={}&submit=Delete",
-                    url_encode_f(&account),
-                    url_encode_f(domain),
-                    url_encode_f(&del_id),
-                );
-                let _ = http::post(
-                    &zone_page_url,
-                    del_form.as_bytes(),
-                    "application/x-www-form-urlencoded",
-                    headers,
-                );
-            }
-        }
-        Ok(())
-    }
-}
-
-impl He {
-    fn login(&self) -> Result<String, Error> {
-        let _ = http::get("https://dns.he.net/", &[]);
-
-        let form = format!(
-            "email={}&pass={}&submit=Login",
+            "email={}&pass={}&account=&menu=edit_zone&Type=TXT&hosted_dns_zoneid={}&hosted_dns_recordid=&hosted_dns_editzone=1&Priority=&Name={}&Content={}&TTL=300&hosted_dns_editrecord=Submit",
             url_encode_f(&self.username),
             url_encode_f(&self.password),
+            url_encode_f(&zone_id),
+            url_encode_f(name),
+            url_encode_f(value),
         );
         let resp = http::post(
             "https://dns.he.net/",
@@ -121,47 +46,178 @@ impl He {
             "application/x-www-form-urlencoded",
             &[],
         )
+        .map_err(|e| Error::Provider(format!("HE add TXT: {e}")))?;
+        if resp.status >= 400 {
+            return Err(Error::Provider(format!("HE add TXT: HTTP {}", resp.status)));
+        }
+        Ok(())
+    }
+
+    fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let zone_id = match self.find_zone(name) {
+            Ok(id) => id,
+            Err(_) => return Ok(()),
+        };
+
+        let form = format!(
+            "email={}&pass={}&hosted_dns_zoneid={}&menu=edit_zone&hosted_dns_editzone=",
+            url_encode_f(&self.username),
+            url_encode_f(&self.password),
+            url_encode_f(&zone_id),
+        );
+        let resp = match http::post(
+            "https://dns.he.net/",
+            form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[],
+        ) {
+            Ok(r) => r,
+            Err(_) => return Ok(()),
+        };
+
+        let record_id = match find_record_id(&resp.body, name, value) {
+            Some(id) => id,
+            None => return Ok(()),
+        };
+
+        let del_form = format!(
+            "email={}&pass={}&menu=edit_zone&hosted_dns_zoneid={}&hosted_dns_recordid={}&hosted_dns_editzone=1&hosted_dns_delrecord=1&hosted_dns_delconfirm=delete",
+            url_encode_f(&self.username),
+            url_encode_f(&self.password),
+            url_encode_f(&zone_id),
+            url_encode_f(&record_id),
+        );
+        let _ = http::post(
+            "https://dns.he.net/",
+            del_form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[],
+        );
+        Ok(())
+    }
+}
+
+impl He {
+    fn find_zone(&self, domain: &str) -> Result<String, Error> {
+        let body = format!(
+            "email={}&pass={}",
+            url_encode_f(&self.username),
+            url_encode_f(&self.password),
+        );
+        let resp = http::post(
+            "https://dns.he.net/",
+            body.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[],
+        )
         .map_err(|e| Error::Provider(format!("HE login: {e}")))?;
 
-        let cookies = resp.headers.get("set-cookie")
-            .cloned()
-            .unwrap_or_default();
-
-        if resp.body.contains("Login failed") || resp.body.contains("Invalid") {
+        if resp.body.contains(">Incorrect<") {
             return Err(Error::Provider("HE: login failed".into()));
         }
 
-        Ok(parse_cookies_he(&cookies))
-    }
+        let zones = parse_zones(&resp.body);
+        if zones.is_empty() {
+            return Err(Error::Provider("HE: could not parse zones".into()));
+        }
 
-    fn find_zone_id(&self, domain: &str, cookies: &str) -> Result<String, Error> {
-        let headers: &[(&str, &str)] = &[("Cookie", cookies)];
-        let resp = http::get("https://dns.he.net/", headers)
-            .map_err(|e| Error::Provider(format!("HE list zones: {e}")))?;
-
-        if resp.body.contains(domain) {
-            return Ok(domain.to_string());
+        let parts: Vec<&str> = domain.split('.').collect();
+        for i in 0..parts.len() {
+            let attempt = parts[i..].join(".");
+            for (zone_name, zone_id) in &zones {
+                if *zone_name == attempt {
+                    return Ok(zone_id.clone());
+                }
+            }
         }
 
         Err(Error::Provider(format!("HE: zone not found for {domain}")))
     }
 }
 
-fn find_block_before<'a>(text: &'a str, marker: &str, boundary: &str) -> Option<String> {
-    if let Some(pos) = text.find(marker) {
-        let before = &text[..pos];
-        if let Some(bpos) = before.rfind(boundary) {
-            return Some(before[bpos..].to_string());
+fn parse_zones(html: &str) -> Vec<(String, String)> {
+    let mut zones = Vec::new();
+
+    let table_start = match html.find("id=\"domains_table\"") {
+        Some(pos) => pos,
+        None => return zones,
+    };
+
+    let table_section = &html[table_start..];
+    let table_end = table_section.find("</table>").unwrap_or(table_section.len());
+    let table_html = &table_section[..table_end];
+
+    let rows: Vec<&str> = table_html.split("<tr").collect();
+
+    for row in rows {
+        if !row.contains("alt=\"edit\"") {
+            continue;
         }
-        return Some(before[before.len().saturating_sub(1024)..].to_string());
+
+        let no_spaces: String = row.chars().filter(|c| !c.is_whitespace()).collect();
+        let cells: Vec<&str> = no_spaces.split("<td").collect();
+        for cell in cells {
+            if !cell.contains("hosted_dns_zoneid") {
+                continue;
+            }
+
+            let zone_id = match extract_zone_id(cell) {
+                Some(id) => id,
+                None => continue,
+            };
+            let zone_name = match extract_zone_name(cell) {
+                Some(name) => name,
+                None => continue,
+            };
+            zones.push((zone_name, zone_id));
+        }
     }
-    None
+
+    zones
 }
 
-fn extract_value(text: &str, prefix: &str, suffix: &str) -> Option<String> {
-    let start = text.find(prefix)? + prefix.len();
-    let end = text[start..].find(suffix)?;
-    Some(text[start..start + end].to_string())
+fn extract_zone_id(cell: &str) -> Option<String> {
+    let marker = "hosted_dns_zoneid=";
+    let pos = cell.find(marker)? + marker.len();
+    let rest = &cell[pos..];
+    let end = rest.find(|c: char| !c.is_ascii_digit())?;
+    let id = &rest[..end];
+    if id.is_empty() {
+        None
+    } else {
+        Some(id.to_string())
+    }
+}
+
+fn extract_zone_name(cell: &str) -> Option<String> {
+    let marker = "name=\"";
+    let pos = cell.find(marker)? + marker.len();
+    let rest = &cell[pos..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+fn find_record_id(html: &str, full_domain: &str, txt_value: &str) -> Option<String> {
+    let rows: Vec<&str> = html.split("<tr").collect();
+    for row in rows {
+        if !row.contains(full_domain) {
+            continue;
+        }
+        if !row.contains("\"dns_tr\"") {
+            continue;
+        }
+        if !row.contains(txt_value) {
+            continue;
+        }
+        let fields: Vec<&str> = row.split('"').collect();
+        if fields.len() >= 4 {
+            let id = fields[3].trim();
+            if !id.is_empty() {
+                return Some(id.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn url_encode_f(s: &str) -> String {
@@ -186,19 +242,4 @@ fn hex_f(n: u8) -> char {
     } else {
         (b'A' + n - 10) as char
     }
-}
-
-fn parse_cookies_he(raw: &str) -> String {
-    let mut cookies = Vec::new();
-    for part in raw.split(',') {
-        let part = part.trim();
-        if let Some(semi) = part.find(';') {
-            if part[..semi].contains('=') {
-                cookies.push(part[..semi].to_string());
-            }
-        } else if part.contains('=') {
-            cookies.push(part.to_string());
-        }
-    }
-    cookies.join("; ")
 }
