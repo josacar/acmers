@@ -1,79 +1,91 @@
 use std::collections::HashMap;
-use serde_json::Value;
 
-use crate::base64;
 use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
-const BASE_URL: &str = "https://api.namemaster.de/api/v1";
+const BASE_URL: &str = "https://namemaster.de/api/api.php";
 
 pub struct Nm {
-    basic_auth: String,
+    user: String,
+    sha256: String,
 }
 
 impl DnsProvider for Nm {
     fn slug() -> &'static str { "nm" }
-    fn env_vars() -> &'static [&'static str] { &["NM_Username", "NM_Password"] }
+    fn env_vars() -> &'static [&'static str] { &["NM_user", "NM_sha256"] }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let user = env.get("NM_Username")
-            .ok_or_else(|| Error::Config("NM_Username required".into()))?.clone();
-        let pass = env.get("NM_Password")
-            .ok_or_else(|| Error::Config("NM_Password required".into()))?.clone();
-        let creds = format!("{user}:{pass}");
-        let basic_auth = format!("Basic {}", base64::encode_std(creds.as_bytes()));
-        Ok(Box::new(Nm { basic_auth }))
+        let user = env.get("NM_user")
+            .ok_or_else(|| Error::Config("NM_user required".into()))?.clone();
+        let sha256 = env.get("NM_sha256")
+            .ok_or_else(|| Error::Config("NM_sha256 required".into()))?.clone();
+        Ok(Box::new(Nm { user, sha256 }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let body = serde_json::json!({
-            "type": "TXT",
-            "name": rec_name,
-            "content": value,
-            "ttl": 120,
-        });
-        let url = format!("{BASE_URL}/domains/{domain}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let zone = self.get_zone(name)?;
+
+        let url = format!(
+            "{BASE_URL}?User={}&Password={}&Antwort=csv&Typ=ACME&zone={}&hostname={}&TXT={}&Action=Auto&Lifetime=3600",
+            url_encode(&self.user),
+            url_encode(&self.sha256),
+            url_encode(&zone),
+            url_encode(name),
+            url_encode(value),
+        );
+
+        let resp = http::get(&url, &[])
             .map_err(|e| Error::Provider(format!("nm add TXT: {e}")))?;
-        if resp.status >= 400 {
-            return Err(Error::Provider(format!("nm add TXT: HTTP {} {}", resp.status, resp.body)));
+        if !resp.body.contains("Success") {
+            return Err(Error::Provider(format!("nm add TXT: {}", resp.body)));
         }
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
-        let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let list_url = format!("{BASE_URL}/domains/{domain}/records");
-        let resp = match http::get(&list_url, headers) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-        let v: Value = match serde_json::from_str(&resp.body) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        let records = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("records").and_then(|r| r.as_array()));
-        if let Some(records) = records {
-            for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(rec_name)
-                {
-                    if let Some(id) = record.get("id").and_then(|i| if i.is_string() { i.as_str() } else { None })
-                        .or_else(|| record.get("record_id").and_then(|i| i.as_str()))
-                    {
-                        let del_url = format!("{BASE_URL}/domains/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
-                }
+    fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
+        Ok(())
+    }
+}
+
+impl Nm {
+    fn get_zone(&self, hostname: &str) -> Result<String, Error> {
+        let url = format!(
+            "{BASE_URL}?User={}&Password={}&Typ=acme&hostname={}&Action=getzone&antwort=csv",
+            url_encode(&self.user),
+            url_encode(&self.sha256),
+            url_encode(hostname),
+        );
+
+        let resp = http::get(&url, &[])
+            .map_err(|e| Error::Provider(format!("nm getzone: {e}")))?;
+        if resp.body.contains("hostname not found") {
+            return Err(Error::Provider(format!("nm getzone: hostname not found: {hostname}")));
+        }
+        Ok(resp.body.trim().to_string())
+    }
+}
+
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b' ' => out.push('+'),
+            _ => {
+                out.push('%');
+                out.push(hex_char((b >> 4) & 0xf));
+                out.push(hex_char(b & 0xf));
             }
         }
-        Ok(())
+    }
+    out
+}
+
+fn hex_char(n: u8) -> char {
+    if n < 10 {
+        (b'0' + n) as char
+    } else {
+        (b'A' + n - 10) as char
     }
 }
