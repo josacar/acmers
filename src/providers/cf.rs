@@ -6,7 +6,9 @@ use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Cloudflare {
-    token: String,
+    token: Option<String>,
+    key: Option<String>,
+    email: Option<String>,
     zone_id: Option<String>,
     account_id: Option<String>,
 }
@@ -17,15 +19,22 @@ impl DnsProvider for Cloudflare {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["CF_Token", "CF_Zone_ID", "CF_Account_ID"]
+        &["CF_Token", "CF_Key", "CF_Email", "CF_Zone_ID", "CF_Account_ID"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("CF_Token").ok_or_else(|| {
-            Error::Config("CF_Token environment variable required".into())
-        })?.clone();
+        let token = env.get("CF_Token").cloned();
+        let key = env.get("CF_Key").cloned();
+        let email = env.get("CF_Email").cloned();
+
+        if token.is_none() && (key.is_none() || email.is_none()) {
+            return Err(Error::Config("CF_Token or CF_Key+CF_Email required".into()));
+        }
+
         Ok(Box::new(Cloudflare {
             token,
+            key,
+            email,
             zone_id: env.get("CF_Zone_ID").cloned(),
             account_id: env.get("CF_Account_ID").cloned(),
         }))
@@ -41,30 +50,40 @@ impl DnsProvider for Cloudflare {
         });
         let url = format!("https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records");
         let body = serde_json::to_vec(&record).unwrap();
-        let auth = format!("Bearer {}", self.token);
-        let resp = http::post(&url, &body, "application/json", &[("Authorization", &auth)])
+        let headers = self.auth_headers();
+        let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let resp = http::post(&url, &body, "application/json", &refs)
             .map_err(|e| Error::Provider(format!("CF add TXT: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("CF response: {e}")))?;
         if v.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
-            Ok(())
-        } else {
-            let err = v.get("errors").and_then(|e| e.as_array())
-                .and_then(|a| a.first())
-                .and_then(|e| e.get("message"))
-                .and_then(|m| m.as_str())
-                .unwrap_or("unknown");
-            Err(Error::Provider(format!("CF add TXT: {err}")))
+            return Ok(());
         }
+        if let Some(errors) = v.get("errors").and_then(|e| e.as_array()) {
+            for err in errors {
+                let msg = err.get("message").and_then(|m| m.as_str()).unwrap_or("");
+                if msg.contains("already exists") || msg.contains("identical")
+                    || err.get("code").and_then(|c| c.as_u64()) == Some(81058)
+                {
+                    return Ok(());
+                }
+            }
+            if let Some(first) = errors.first() {
+                let msg = first.get("message").and_then(|m| m.as_str()).unwrap_or("unknown");
+                return Err(Error::Provider(format!("CF add TXT: {msg}")));
+            }
+        }
+        Err(Error::Provider("CF add TXT: unknown error".into()))
     }
 
     fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
         let zone_id = self.resolve_zone(domain)?;
-        let auth = format!("Bearer {}", self.token);
+        let headers = self.auth_headers();
+        let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         let list_url = format!(
             "https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records?type=TXT&name={name}&content={value}"
         );
-        let resp = http::get(&list_url, &[("Authorization", &auth)])
+        let resp = http::get(&list_url, &refs)
             .map_err(|e| Error::Provider(format!("CF list records: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("CF list response: {e}")))?;
@@ -74,8 +93,7 @@ impl DnsProvider for Cloudflare {
                     let del_url = format!(
                         "https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records/{id}"
                     );
-                    let body = serde_json::json!({});
-                    let _ = http::post(&del_url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &auth)]);
+                    let _ = http::delete(&del_url, &refs);
                 }
             }
         }
@@ -84,44 +102,54 @@ impl DnsProvider for Cloudflare {
 }
 
 impl Cloudflare {
+    fn auth_headers(&self) -> Vec<(String, String)> {
+        if let Some(ref token) = self.token {
+            vec![("Authorization".to_string(), format!("Bearer {token}"))]
+        } else {
+            vec![
+                ("X-Auth-Email".to_string(), self.email.clone().unwrap_or_default()),
+                ("X-Auth-Key".to_string(), self.key.clone().unwrap_or_default()),
+            ]
+        }
+    }
 
     fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
         if let Some(ref zid) = self.zone_id {
-            return Ok(zid.clone());
-        }
-
-        let auth = format!("Bearer {}", self.token);
-
-        if let Some(ref account_id) = self.account_id {
-            let list_url = format!("https://api.cloudflare.com/client/v4/zones?account.id={account_id}");
-            let resp = http::get(&list_url, &[("Authorization", &auth)])
-                .map_err(|e| Error::Provider(format!("CF list zones: {e}")))?;
+            let url = format!("https://api.cloudflare.com/client/v4/zones/{zid}");
+            let headers = self.auth_headers();
+            let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+            let resp = http::get(&url, &refs)
+                .map_err(|e| Error::Provider(format!("CF get zone: {e}")))?;
             let v: Value = serde_json::from_str(&resp.body)
-                .map_err(|e| Error::Json(format!("CF zones response: {e}")))?;
-            if let Some(zones) = v.get("result").and_then(|r| r.as_array()) {
-                for z in zones {
-                    if let Some(name) = z.get("name").and_then(|n| n.as_str()) {
-                        if domain == name || domain.ends_with(&format!(".{name}")) {
-                            if let Some(id) = z.get("id").and_then(|i| i.as_str()) {
-                                return Ok(id.to_string());
-                            }
-                        }
-                    }
-                }
+                .map_err(|e| Error::Json(format!("CF zone response: {e}")))?;
+            if v.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
+                return Ok(zid.clone());
             }
+            return Err(Error::Provider(format!("invalid zone ID {zid}")));
         }
+
+        let headers = self.auth_headers();
+        let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
 
         let mut search = domain.to_string();
         loop {
-            let search_url = format!("https://api.cloudflare.com/client/v4/zones?name={search}");
-            let resp = http::get(&search_url, &[("Authorization", &auth)])
+            let search_url = if let Some(ref account_id) = self.account_id {
+                format!("https://api.cloudflare.com/client/v4/zones?name={search}&account.id={account_id}")
+            } else {
+                format!("https://api.cloudflare.com/client/v4/zones?name={search}")
+            };
+            let resp = http::get(&search_url, &refs)
                 .map_err(|e| Error::Provider(format!("CF search zones: {e}")))?;
             let v: Value = serde_json::from_str(&resp.body)
                 .map_err(|e| Error::Json(format!("CF zones response: {e}")))?;
             if let Some(zones) = v.get("result").and_then(|r| r.as_array()) {
                 if let Some(z) = zones.first() {
-                    if let Some(id) = z.get("id").and_then(|i| i.as_str()) {
-                        return Ok(id.to_string());
+                    if let Some(name) = z.get("name").and_then(|n| n.as_str()) {
+                        if name == search {
+                            if let Some(id) = z.get("id").and_then(|i| i.as_str()) {
+                                return Ok(id.to_string());
+                            }
+                        }
                     }
                 }
             }

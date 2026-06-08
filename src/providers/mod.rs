@@ -223,7 +223,7 @@ pub struct ProviderMeta {
 }
 
 pub static PROVIDERS: &[ProviderMeta] = &[
-    ProviderMeta { slug: "cf", name: "Cloudflare", env_vars: &["CF_Token", "CF_Zone_ID", "CF_Account_ID"], create: |env| cf::Cloudflare::new(env) },
+    ProviderMeta { slug: "cf", name: "Cloudflare", env_vars: &["CF_Token", "CF_Key", "CF_Email", "CF_Zone_ID", "CF_Account_ID"], create: |env| cf::Cloudflare::new(env) },
     ProviderMeta { slug: "acmedns", name: "Acmedns", env_vars: &["ACMEDNS_URL_BASE", "ACMEDNS_USERNAME", "ACMEDNS_PASSWORD", "ACMEDNS_SUBDOMAIN"], create: |env| acmedns::Acmedns::new(env) },
     ProviderMeta { slug: "acmeproxy", name: "Acmeproxy", env_vars: &["ACMEPROXY_URL_BASE", "ACMEPROXY_USERNAME", "ACMEPROXY_PASSWORD"], create: |env| acmeproxy::Acmeproxy::new(env) },
     ProviderMeta { slug: "active24", name: "Active24", env_vars: &["ACTIVE24_Token"], create: |env| active24::Active24::new(env) },
