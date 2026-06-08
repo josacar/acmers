@@ -8,6 +8,7 @@ use crate::providers::{DnsProvider, ProviderResult};
 
 const TOKEN_URL: &str = "https://login.microsoftonline.com";
 const BASE_URL: &str = "https://management.azure.com/subscriptions";
+const API_VERSION: &str = "2017-09-01";
 
 pub struct Azure {
     subscription_id: String,
@@ -44,24 +45,37 @@ impl DnsProvider for Azure {
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
         let token = get_token(&self.tenant_id, &self.app_id, &self.client_secret)?;
         let auth = format!("Bearer {token}");
-        let (rg_name, zone_name) = self.resolve_zone(domain, &auth)?;
+        let (domain_id, sub_domain) = self.resolve_zone(domain, &auth)?;
 
-        let record_name = if name.ends_with(&format!(".{zone_name}")) {
-            name.strip_suffix(&format!(".{zone_name}")).unwrap_or(name)
-        } else {
-            name
-        };
+        let url = format!(
+            "https://management.azure.com{domain_id}/TXT/{sub_domain}?api-version={API_VERSION}",
+        );
+
+        let mut records = vec![serde_json::json!({"value": [value]})];
+
+        let existing = http::get(&url, &[("Authorization", &auth)]);
+        if let Ok(ref resp) = existing {
+            if resp.status == 200 {
+                if let Ok(v) = serde_json::from_str::<Value>(&resp.body) {
+                    if let Some(arr) = v.pointer("/properties/TXTRecords").and_then(|a| a.as_array()) {
+                        for entry in arr {
+                            if let Some(val_arr) = entry.get("value").and_then(|v| v.as_array()) {
+                                for val in val_arr {
+                                    records.push(serde_json::json!({"value": [val]}));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
 
         let body = serde_json::json!({
             "properties": {
-                "TTL": 60,
-                "TXTRecords": [{"value": [value]}]
+                "TTL": 10,
+                "TXTRecords": records
             }
         });
-        let url = format!(
-            "{BASE_URL}/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/dnsZones/{zone}/TXT/{record_name}?api-version=2018-05-01",
-            sub = self.subscription_id, rg = rg_name, zone = zone_name
-        );
         let resp = http::put(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &auth)])
             .map_err(|e| Error::Provider(format!("Azure add TXT: {e}")))?;
 
@@ -71,72 +85,43 @@ impl DnsProvider for Azure {
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
+    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
         let token = match get_token(&self.tenant_id, &self.app_id, &self.client_secret) {
             Ok(t) => t,
             Err(_) => return Ok(()),
         };
         let auth = format!("Bearer {token}");
-        let (rg_name, zone_name) = match self.resolve_zone(domain, &auth) {
+        let (domain_id, sub_domain) = match self.resolve_zone(domain, &auth) {
             Ok(z) => z,
             Err(_) => return Ok(()),
         };
 
-        let record_name = if name.ends_with(&format!(".{zone_name}")) {
-            name.strip_suffix(&format!(".{zone_name}")).unwrap_or(name)
-        } else {
-            name
+        let url = format!(
+            "https://management.azure.com{domain_id}/TXT/{sub_domain}?api-version={API_VERSION}",
+        );
+
+        let resp = match http::get(&url, &[("Authorization", &auth)]) {
+            Ok(r) => r,
+            Err(_) => return Ok(()),
         };
 
-        let url = format!(
-            "{BASE_URL}/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/dnsZones/{zone}/TXT/{record_name}?api-version=2018-05-01",
-            sub = self.subscription_id, rg = rg_name, zone = zone_name
-        );
-        let _ = http::delete(&url, &[("Authorization", &auth)]);
-        Ok(())
-    }
-}
-
-impl Azure {
-    fn resolve_zone(&self, domain: &str, auth: &str) -> Result<(String, String), Error> {
-        let groups_url = format!("{BASE_URL}/{sub}/resourceGroups?api-version=2021-04-01", sub = self.subscription_id);
-        let resp = http::get(&groups_url, &[("Authorization", auth)])
-            .map_err(|e| Error::Provider(format!("Azure list groups: {e}")))?;
-
-        if resp.status >= 300 {
-            return Err(Error::Provider(format!("Azure list groups: {} {}", resp.status, resp.body)));
+        if resp.status != 200 {
+            return Ok(());
         }
 
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("Azure groups: {e}")))?;
+        let v: Value = match serde_json::from_str(&resp.body) {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
 
-        if let Some(groups) = v.get("value").and_then(|g| g.as_array()) {
-            for group in groups {
-                if let Some(rg_name) = group.get("name").and_then(|n| n.as_str()) {
-                    let zones_url = format!(
-                        "{BASE_URL}/{sub}/resourceGroups/{rg}/providers/Microsoft.Network/dnsZones?api-version=2018-05-01",
-                        sub = self.subscription_id, rg = rg_name
-                    );
-                    let zones_resp = match http::get(&zones_url, &[("Authorization", auth)]) {
-                        Ok(r) => r,
-                        Err(_) => continue,
-                    };
-
-                    if zones_resp.status >= 300 {
-                        continue;
-                    }
-
-                    let zones_v: Value = match serde_json::from_str(&zones_resp.body) {
-                        Ok(v) => v,
-                        Err(_) => continue,
-                    };
-
-                    if let Some(zones) = zones_v.get("value").and_then(|z| z.as_array()) {
-                        for zone in zones {
-                            if let Some(name) = zone.get("name").and_then(|n| n.as_str()) {
-                                if domain == name || domain.ends_with(&format!(".{name}")) {
-                                    return Ok((rg_name.to_string(), name.to_string()));
-                                }
+        let mut remaining = Vec::new();
+        if let Some(arr) = v.pointer("/properties/TXTRecords").and_then(|a| a.as_array()) {
+            for entry in arr {
+                if let Some(val_arr) = entry.get("value").and_then(|v| v.as_array()) {
+                    for val in val_arr {
+                        if let Some(s) = val.as_str() {
+                            if s != value {
+                                remaining.push(serde_json::json!({"value": [s]}));
                             }
                         }
                     }
@@ -144,13 +129,78 @@ impl Azure {
             }
         }
 
-        Err(Error::Provider(format!("zone not found for {domain}")))
+        if remaining.is_empty() {
+            let _ = http::delete(&url, &[("Authorization", &auth)]);
+        } else {
+            let body = serde_json::json!({
+                "properties": {
+                    "TTL": 10,
+                    "TXTRecords": remaining
+                }
+            });
+            let _ = http::put(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &auth)]);
+        }
+        Ok(())
+    }
+}
+
+impl Azure {
+    fn resolve_zone(&self, domain: &str, auth: &str) -> Result<(String, String), Error> {
+        let url = format!(
+            "{BASE_URL}/{sub}/providers/Microsoft.Network/dnszones?$top=500&api-version={API_VERSION}",
+            sub = self.subscription_id,
+        );
+        let resp = http::get(&url, &[("Authorization", auth)])
+            .map_err(|e| Error::Provider(format!("Azure list zones: {e}")))?;
+
+        if resp.status >= 300 {
+            return Err(Error::Provider(format!("Azure list zones: {} {}", resp.status, resp.body)));
+        }
+
+        let v: Value = serde_json::from_str(&resp.body)
+            .map_err(|e| Error::Json(format!("Azure zones: {e}")))?;
+
+        let zones = v.get("value").and_then(|z| z.as_array())
+            .ok_or_else(|| Error::Provider("Azure zones: no value array".into()))?;
+
+        let mut best_id = String::new();
+        let mut best_sub = String::new();
+        let mut best_len: usize = 0;
+
+        for zone in zones {
+            let zone_name = match zone.get("name").and_then(|n| n.as_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+            let zone_id = match zone.get("id").and_then(|i| i.as_str()) {
+                Some(i) => i,
+                None => continue,
+            };
+
+            if domain == zone_name || domain.ends_with(&format!(".{zone_name}")) {
+                let match_len = zone_name.len();
+                if match_len > best_len {
+                    best_len = match_len;
+                    best_id = zone_id.to_string();
+                    best_sub = if domain == zone_name {
+                        "@".to_string()
+                    } else {
+                        domain[..domain.len() - zone_name.len() - 1].to_string()
+                    };
+                }
+            }
+        }
+
+        if best_len == 0 {
+            return Err(Error::Provider(format!("zone not found for {domain}")));
+        }
+        Ok((best_id, best_sub))
     }
 }
 
 fn get_token(tenant_id: &str, app_id: &str, client_secret: &str) -> Result<String, Error> {
-    let url = format!("{TOKEN_URL}/{tenant_id}/oauth2/v2.0/token");
-    let body = format!("grant_type=client_credentials&client_id={app_id}&client_secret={client_secret}&scope=https://management.azure.com/.default");
+    let url = format!("{TOKEN_URL}/{tenant_id}/oauth2/token");
+    let body = format!("resource=https%3A%2F%2Fmanagement.core.windows.net%2F&client_id={app_id}&client_secret={client_secret}&grant_type=client_credentials");
     let resp = http::post(&url, body.as_bytes(), "application/x-www-form-urlencoded", &[])
         .map_err(|e| Error::Provider(format!("Azure auth: {e}")))?;
 

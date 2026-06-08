@@ -80,6 +80,31 @@ pub fn encode_std(input: &[u8]) -> String {
     out
 }
 
+pub fn decode_std(input: &str) -> Result<Vec<u8>, &'static str> {
+    let input = input.trim_end_matches('=');
+    let mut out = Vec::with_capacity(input.len() * 3 / 4);
+    let mut buf = 0u32;
+    let mut bits = 0u32;
+    for c in input.bytes() {
+        let val = match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return Err("invalid base64 character"),
+        } as u32;
+        buf = (buf << 6) | val;
+        bits += 6;
+        if bits >= 8 {
+            bits -= 8;
+            out.push((buf >> bits) as u8);
+            buf &= (1 << bits) - 1;
+        }
+    }
+    Ok(out)
+}
+
 pub fn hex(input: &[u8]) -> String {
     let mut out = String::with_capacity(input.len() * 2);
     for b in input {

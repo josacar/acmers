@@ -288,7 +288,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "freedns", name: "Freedns", env_vars: &["FREEDNS_User", "FREEDNS_Password"], create: |env| freedns::Freedns::new(env) },
     ProviderMeta { slug: "freemyip", name: "Freemyip", env_vars: &["FREEMYIP_Token"], create: |env| freemyip::Freemyip::new(env) },
     ProviderMeta { slug: "gandi_livedns", name: "GandiLivedns", env_vars: &["GANDI_LIVEDNS_TOKEN"], create: |env| gandi_livedns::GandiLivedns::new(env) },
-    ProviderMeta { slug: "gcloud", name: "Gcloud", env_vars: &["GCLOUD_PROJECT", "GCLOUD_SERVICE_ACCOUNT", "GCLOUD_ACCOUNT_TYPE"], create: |env| gcloud::Gcloud::new(env) },
+    ProviderMeta { slug: "gcloud", name: "Gcloud", env_vars: &["GCLOUD_PROJECT", "GCLOUD_SERVICE_ACCOUNT_KEY"], create: |env| gcloud::Gcloud::new(env) },
     ProviderMeta { slug: "gcore", name: "Gcore", env_vars: &["GCORE_PermanentAPIKey"], create: |env| gcore::Gcore::new(env) },
     ProviderMeta { slug: "gd", name: "Godaddy", env_vars: &["GD_Key", "GD_Secret"], create: |env| gd::Godaddy::new(env) },
     ProviderMeta { slug: "geoscaling", name: "Geoscaling", env_vars: &["GEOSCALING_Username", "GEOSCALING_Password"], create: |env| geoscaling::Geoscaling::new(env) },
