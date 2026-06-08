@@ -5,6 +5,20 @@ use crate::error::Error;
 use crate::http;
 use crate::json as j;
 
+fn check_response(resp: &http::Response, context: &str) -> Result<(), Error> {
+    if resp.status >= 400 {
+        let v: Value = serde_json::from_str(&resp.body).unwrap_or(Value::Null);
+        let detail = j::get_string(&v, &["detail"]).unwrap_or(&resp.body);
+        let typ = j::get_string(&v, &["type"]).unwrap_or("about:blank");
+        return Err(Error::Acme {
+            status: resp.status,
+            detail: format!("{context}: {detail}"),
+            error_type: typ.to_string(),
+        });
+    }
+    Ok(())
+}
+
 pub struct Authorization {
     pub identifier: Identifier,
     pub status: String,
@@ -28,7 +42,7 @@ pub struct Challenge {
 impl Challenge {
     pub fn key_authorization(&self, jwk_thumbprint: &str) -> String {
         let token = self.token.as_deref().unwrap_or("");
-        format!("{}.{}", token, jwk_thumbprint)
+        format!("{token}.{jwk_thumbprint}")
     }
 }
 
@@ -50,8 +64,10 @@ pub fn get_authorizations(
         )
         .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
 
+        check_response(&resp, &format!("get authorization for {url}"))?;
+
         let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("parse authz: {e}")))?;
+            .map_err(|e| Error::Json(format!("authz parse: {e}")))?;
 
         let identifier_val = j::get_value_required(&v, &["identifier"])?;
         let challenges_arr = j::get_array_required(&v, &["challenges"])?;
@@ -104,8 +120,10 @@ pub fn respond_to_challenge(
     )
     .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
 
+    check_response(&resp, "respond to challenge")?;
+
     let v: Value = serde_json::from_str(&resp.body)
-        .map_err(|e| Error::Json(format!("parse challenge response: {e}")))?;
+        .map_err(|e| Error::Json(format!("challenge response: {e}")))?;
     let status = j::get_string_required(&v, &["status"])?;
     if status == "invalid" {
         let err = j::get_string(&v, &["error", "detail"]).unwrap_or("unknown");
@@ -127,7 +145,7 @@ pub fn poll_challenge(
     for _ in 0..30 {
         std::thread::sleep(std::time::Duration::from_secs(2));
         let nonce = get_nonce()?;
-        let jws = crate::crypto::sign_jws(
+        let jws = sign_jws(
             b"",
             &key.key_pair,
             &KidOrJwk::Kid(account_url.to_string()),
@@ -142,8 +160,10 @@ pub fn poll_challenge(
         )
         .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
 
+        if resp.status >= 400 { continue; }
+
         let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("parse challenge poll: {e}")))?;
+            .map_err(|e| Error::Json(format!("poll challenge: {e}")))?;
         let status = j::get_string_required(&v, &["status"])?;
         match status {
             "valid" => return Ok(status.to_string()),
@@ -165,43 +185,12 @@ pub fn poll_challenge(
     })
 }
 
-pub fn start_http_server(port: u16, challenges: std::collections::HashMap<String, String>) -> std::thread::JoinHandle<()> {
-    let listener = std::net::TcpListener::bind(("0.0.0.0", port)).unwrap();
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            if let Ok(mut stream) = stream {
-                let mut buf = [0u8; 4096];
-                if let Ok(n) = std::io::Read::read(&mut stream, &mut buf) {
-                    let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
-                    if let Some(line) = req.lines().next() {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 2 {
-                            let path = parts[1];
-                            let token = path.trim_start_matches("/.well-known/acme-challenge/");
-                            if let Some(content) = challenges.get(token) {
-                                let resp = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{}", content.len(), content);
-                                let _ = std::io::Write::write_all(&mut stream, resp.as_bytes());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    })
-}
-
 pub fn start_http_challenges(
     challenges: &[(String, String)],
 ) -> std::thread::JoinHandle<()> {
     use std::collections::HashMap;
     let map: HashMap<String, String> = challenges.iter().cloned().collect();
-    let listener = match std::net::TcpListener::bind("0.0.0.0:80") {
-        Ok(l) => l,
-        Err(e) => {
-            eprintln!("Cannot bind port 80: {e}. Run with sudo or use DNS-01 challenge.");
-            std::process::exit(1);
-        }
-    };
+    let listener = std::net::TcpListener::bind("0.0.0.0:80").expect("cannot bind port 80");
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             if let Ok(mut stream) = stream {

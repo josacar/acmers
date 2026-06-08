@@ -5,6 +5,20 @@ use crate::error::Error;
 use crate::http;
 use crate::json as j;
 
+fn check_response(resp: &http::Response, context: &str) -> Result<(), Error> {
+    if resp.status >= 400 {
+        let v: Value = serde_json::from_str(&resp.body).unwrap_or(Value::Null);
+        let detail = j::get_string(&v, &["detail"]).unwrap_or(&resp.body);
+        let typ = j::get_string(&v, &["type"]).unwrap_or("about:blank");
+        return Err(Error::Acme {
+            status: resp.status,
+            detail: format!("{context}: {detail}"),
+            error_type: typ.to_string(),
+        });
+    }
+    Ok(())
+}
+
 pub struct Order {
     pub url: String,
     pub status: String,
@@ -44,12 +58,14 @@ pub fn create_order(
     )
     .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
 
+    check_response(&resp, "create order")?;
+
     let v: Value = serde_json::from_str(&resp.body)
-        .map_err(|e| Error::Json(format!("parse order: {e}")))?;
+        .map_err(|e| Error::Json(format!("create order: {e} (body: {})", &resp.body[..resp.body.len().min(500)])))?;
 
     let order_url = j::get_string(&v, &["url"])
         .or_else(|| resp.headers.get("location").map(|s| s.as_str()))
-        .unwrap_or("")
+        .unwrap_or(new_order_url)
         .to_string();
 
     let status = j::get_string_required(&v, &["status"])?.to_string();
@@ -104,8 +120,10 @@ pub fn finalize_order(
     )
     .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
 
+    check_response(&resp, "finalize order")?;
+
     let v: Value = serde_json::from_str(&resp.body)
-        .map_err(|e| Error::Json(format!("parse finalize: {e}")))?;
+        .map_err(|e| Error::Json(format!("finalize order: {e}")))?;
 
     let status = j::get_string_required(&v, &["status"])?;
     if status == "invalid" {
@@ -149,8 +167,10 @@ pub fn poll_order(
         )
         .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
 
+        if resp.status >= 400 { continue; }
+
         let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("parse order poll: {e}")))?;
+            .map_err(|e| Error::Json(format!("poll order: {e}")))?;
 
         let status = j::get_string_required(&v, &["status"])?;
         match status {
@@ -197,5 +217,7 @@ pub fn download_cert(
         &[],
     )
     .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+
+    check_response(&resp, "download certificate")?;
     Ok(resp.body)
 }
