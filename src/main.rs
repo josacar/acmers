@@ -28,8 +28,8 @@ fn main() {
 
 fn run(cmd: cli::Cmd) -> Result<(), Error> {
     match cmd {
-        cli::Cmd::Issue { domains, provider, email, test, env_overrides } => {
-            cmd_issue(&domains, &provider, email.as_deref(), test, &env_overrides)
+        cli::Cmd::Issue { domains, provider, email, test, standalone, env_overrides } => {
+            cmd_issue(&domains, &provider, email.as_deref(), test, standalone, &env_overrides)
         }
         cli::Cmd::Renew { domain, test } => cmd_renew(&domain, test),
         cli::Cmd::Revoke { domain } => cmd_revoke(&domain),
@@ -61,19 +61,12 @@ fn cmd_issue(
     provider_slug: &str,
     email: Option<&str>,
     test: bool,
+    standalone: bool,
     env_overrides: &HashMap<String, String>,
 ) -> Result<(), Error> {
     let mut config = config::Config::load()?;
     if test {
         config.server = "https://acme-staging-v02.api.letsencrypt.org/directory".to_string();
-    }
-
-    let provider_meta = providers::find(provider_slug)
-        .ok_or_else(|| Error::Config(format!("unknown provider: {provider_slug}")))?;
-
-    let mut env = config::read_env_vars(provider_meta.env_vars);
-    for (k, v) in env_overrides {
-        env.insert(k.clone(), v.clone());
     }
 
     let email = email.ok_or_else(|| Error::Config("email required (use --email)".into()))?;
@@ -96,37 +89,78 @@ fn cmd_issue(
     )?;
 
     let main_domain = &domains[0];
-    let provider = (provider_meta.create)(&env)?;
 
-    for auth in &auths {
-        let domain = &auth.identifier.value;
-        let dns_challenge = auth.challenges.iter()
-            .find(|c| c.typ == "dns-01")
-            .ok_or_else(|| Error::Dns(format!("no dns-01 challenge for {domain}")))?;
-        let token = dns_challenge.token.as_deref()
-            .ok_or_else(|| Error::Dns(format!("no token for {domain}")))?;
+    if standalone {
+        let mut challenge_pairs: Vec<(String, String)> = Vec::new();
+        let mut challenge_urls: Vec<(String, String)> = Vec::new();
+        for auth in &auths {
+            let domain = &auth.identifier.value;
+            let ch = auth.challenges.iter()
+                .find(|c| c.typ == "http-01")
+                .ok_or_else(|| Error::Dns(format!("no http-01 challenge for {domain}")))?;
+            let token = ch.token.as_deref().unwrap_or("");
+            let key_auth = ch.key_authorization(&account.jwk_thumbprint);
+            challenge_pairs.push((token.to_string(), key_auth));
+            challenge_urls.push((ch.url.clone(), domain.clone()));
+        }
 
-        let txt_value = acme::account::dns_txt_value(token, &account_key.jwk_thumbprint);
-        let challenge_domain = format!("_acme-challenge.{domain}");
+        let _server = acme::challenge::start_http_challenges(&challenge_pairs);
 
-        eprintln!("adding TXT record {challenge_domain} = {txt_value}");
-        provider.add_txt(main_domain, &challenge_domain, &txt_value)?;
+        for (url, domain) in &challenge_urls {
+            eprintln!("signaling ACME server for {domain}...");
+            acme::challenge::respond_to_challenge(
+                url, &account.url, &account_key, &mut get_nonce,
+            )?;
 
-        eprintln!("signaling ACME server...");
-        acme::challenge::respond_to_challenge(
-            &dns_challenge.url, &account.url, &account_key, &mut get_nonce,
-        )?;
+            eprintln!("waiting for HTTP-01 validation of {domain}...");
+            let result = acme::challenge::poll_challenge(
+                url, &account.url, &account_key, &mut get_nonce,
+            );
 
-        eprintln!("waiting for validation...");
-        let result = acme::challenge::poll_challenge(
-            &dns_challenge.url, &account.url, &account_key, &mut get_nonce,
-        );
+            result?;
+            eprintln!("{domain} validated!");
+        }
+    } else {
+        let provider_meta = providers::find(provider_slug)
+            .ok_or_else(|| Error::Config(format!("unknown provider: {provider_slug}")))?;
 
-        eprintln!("removing TXT record...");
-        let _ = provider.remove_txt(main_domain, &challenge_domain, &txt_value);
+        let mut env = config::read_env_vars(provider_meta.env_vars);
+        for (k, v) in env_overrides {
+            env.insert(k.clone(), v.clone());
+        }
 
-        result?;
-        eprintln!("{domain} validated!");
+        let provider = (provider_meta.create)(&env)?;
+
+        for auth in &auths {
+            let domain = &auth.identifier.value;
+            let dns_challenge = auth.challenges.iter()
+                .find(|c| c.typ == "dns-01")
+                .ok_or_else(|| Error::Dns(format!("no dns-01 challenge for {domain}")))?;
+            let token = dns_challenge.token.as_deref()
+                .ok_or_else(|| Error::Dns(format!("no token for {domain}")))?;
+
+            let txt_value = acme::account::dns_txt_value(token, &account_key.jwk_thumbprint);
+            let challenge_domain = format!("_acme-challenge.{domain}");
+
+            eprintln!("adding TXT record {challenge_domain} = {txt_value}");
+            provider.add_txt(main_domain, &challenge_domain, &txt_value)?;
+
+            eprintln!("signaling ACME server...");
+            acme::challenge::respond_to_challenge(
+                &dns_challenge.url, &account.url, &account_key, &mut get_nonce,
+            )?;
+
+            eprintln!("waiting for validation...");
+            let result = acme::challenge::poll_challenge(
+                &dns_challenge.url, &account.url, &account_key, &mut get_nonce,
+            );
+
+            eprintln!("removing TXT record...");
+            let _ = provider.remove_txt(main_domain, &challenge_domain, &txt_value);
+
+            result?;
+            eprintln!("{domain} validated!");
+        }
     }
 
     eprintln!("finalizing order...");
@@ -146,7 +180,7 @@ fn cmd_issue(
     std::fs::write(config.key_file(main_domain), &account_key.pkcs8_bytes)?;
     std::fs::write(config.fullchain_file(main_domain), &cert_pem)?;
 
-    save_renewal_config(&config, main_domain, provider_slug, email, test)?;
+    save_renewal_config(&config, main_domain, provider_slug, email, test, standalone)?;
     eprintln!("certificate saved to {:?}", config.cert_file(main_domain));
     Ok(())
 }
@@ -164,6 +198,7 @@ fn cmd_renew(domain: &str, test: bool) -> Result<(), Error> {
 
     let email = json::get_string_required(&v, &["email"])?.to_string();
     let provider_slug = json::get_string_required(&v, &["provider"])?.to_string();
+    let standalone = v.get("standalone").and_then(|s| s.as_bool()).unwrap_or(false);
 
     let cert_file = config.cert_file(domain);
     if cert_file.exists() {
@@ -172,7 +207,7 @@ fn cmd_renew(domain: &str, test: bool) -> Result<(), Error> {
         eprintln!("{domain}: {remaining} days until expiry");
     }
 
-    cmd_issue(&[domain.to_string()], &provider_slug, Some(&email), test, &HashMap::new())
+    cmd_issue(&[domain.to_string()], &provider_slug, Some(&email), test, standalone, &HashMap::new())
 }
 
 fn cmd_revoke(domain: &str) -> Result<(), Error> {
@@ -276,11 +311,13 @@ fn save_renewal_config(
     provider: &str,
     email: &str,
     test: bool,
+    standalone: bool,
 ) -> Result<(), Error> {
     let renewal = serde_json::json!({
         "email": email,
         "provider": provider,
         "test": test,
+        "standalone": standalone,
         "server": config.server,
     });
     let path = config.domain_dir(domain).join("renewal.json");

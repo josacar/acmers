@@ -7,6 +7,7 @@ pub enum Cmd {
         provider: String,
         email: Option<String>,
         test: bool,
+        standalone: bool,
         env_overrides: HashMap<String, String>,
     },
     Renew {
@@ -48,6 +49,7 @@ fn parse_issue(args: &[String]) -> Result<Cmd, String> {
     let mut provider = String::new();
     let mut email = None;
     let mut test = false;
+    let mut standalone = false;
     let mut env_overrides = HashMap::new();
 
     let mut i = 0;
@@ -71,6 +73,9 @@ fn parse_issue(args: &[String]) -> Result<Cmd, String> {
             "--test" | "--staging" => {
                 test = true;
             }
+            "--standalone" => {
+                standalone = true;
+            }
             "-e" if provider.is_empty() => {
                 i += 1;
                 if i >= args.len() { return Err("missing var=val after -e".into()); }
@@ -86,11 +91,11 @@ fn parse_issue(args: &[String]) -> Result<Cmd, String> {
     if domains.is_empty() {
         return Err("at least one -d domain required".into());
     }
-    if provider.is_empty() {
-        return Err("--dns provider required".into());
+    if !standalone && provider.is_empty() {
+        return Err("--dns provider required (or use --standalone)".into());
     }
 
-    Ok(Cmd::Issue { domains, provider, email, test, env_overrides })
+    Ok(Cmd::Issue { domains, provider, email, test, standalone, env_overrides })
 }
 
 fn parse_renew(args: &[String]) -> Result<Cmd, String> {

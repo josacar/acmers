@@ -72,8 +72,9 @@ src/
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| **Implemented** | 121 | Full add_txt/remove_txt with real API calls |
-| **Stub** | 80 | Return proper error messages (not silent no-ops) |
+| **Implemented** | 165 | Full add_txt/remove_txt with real API calls |
+| **Error stubs** | 36 | Return proper error messages (no silent no-ops) |
+| **Coverage** | 100% | All 201 acme.sh providers accounted for |
 | **Total** | 201 | All acme.sh providers accounted for |
 
 ### Provider Tiers (for implementation order)

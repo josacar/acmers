@@ -25,6 +25,13 @@ pub struct Challenge {
     pub status: String,
 }
 
+impl Challenge {
+    pub fn key_authorization(&self, jwk_thumbprint: &str) -> String {
+        let token = self.token.as_deref().unwrap_or("");
+        format!("{}.{}", token, jwk_thumbprint)
+    }
+}
+
 pub fn get_authorizations(
     account_url: &str,
     auth_urls: &[String],
@@ -155,5 +162,68 @@ pub fn poll_challenge(
         status: 0,
         detail: "timed out waiting for challenge".into(),
         error_type: "timeout".into(),
+    })
+}
+
+pub fn start_http_server(port: u16, challenges: std::collections::HashMap<String, String>) -> std::thread::JoinHandle<()> {
+    let listener = std::net::TcpListener::bind(("0.0.0.0", port)).unwrap();
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            if let Ok(mut stream) = stream {
+                let mut buf = [0u8; 4096];
+                if let Ok(n) = std::io::Read::read(&mut stream, &mut buf) {
+                    let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                    if let Some(line) = req.lines().next() {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 2 {
+                            let path = parts[1];
+                            let token = path.trim_start_matches("/.well-known/acme-challenge/");
+                            if let Some(content) = challenges.get(token) {
+                                let resp = format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{}", content.len(), content);
+                                let _ = std::io::Write::write_all(&mut stream, resp.as_bytes());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+pub fn start_http_challenges(
+    challenges: &[(String, String)],
+) -> std::thread::JoinHandle<()> {
+    use std::collections::HashMap;
+    let map: HashMap<String, String> = challenges.iter().cloned().collect();
+    let listener = match std::net::TcpListener::bind("0.0.0.0:80") {
+        Ok(l) => l,
+        Err(e) => {
+            eprintln!("Cannot bind port 80: {e}. Run with sudo or use DNS-01 challenge.");
+            std::process::exit(1);
+        }
+    };
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            if let Ok(mut stream) = stream {
+                let mut buf = [0u8; 4096];
+                if let Ok(n) = std::io::Read::read(&mut stream, &mut buf) {
+                    let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                    if let Some(line) = req.lines().next() {
+                        let parts: Vec<&str> = line.split_whitespace().collect();
+                        if parts.len() >= 2 {
+                            let path = parts[1];
+                            let token = path.trim_start_matches("/.well-known/acme-challenge/");
+                            if let Some(content) = map.get(token) {
+                                let resp = format!(
+                                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{}",
+                                    content.len(), content
+                                );
+                                let _ = std::io::Write::write_all(&mut stream, resp.as_bytes());
+                            }
+                        }
+                    }
+                }
+            }
+        }
     })
 }
