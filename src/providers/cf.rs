@@ -42,10 +42,11 @@ impl DnsProvider for Cloudflare {
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
         let zone_id = self.resolve_zone(domain)?;
+        let quoted_value = format!("\"{}\"", value);
         let record = serde_json::json!({
             "type": "TXT",
             "name": name,
-            "content": value,
+            "content": quoted_value,
             "ttl": 120,
         });
         let url = format!("https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records");
@@ -80,8 +81,9 @@ impl DnsProvider for Cloudflare {
         let zone_id = self.resolve_zone(domain)?;
         let headers = self.auth_headers();
         let refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let quoted_value = format!("\"{}\"", value);
         let list_url = format!(
-            "https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records?type=TXT&name={name}&content={value}"
+            "https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records?type=TXT&name={name}&content={quoted_value}"
         );
         let resp = http::get(&list_url, &refs)
             .map_err(|e| Error::Provider(format!("CF list records: {e}")))?;
