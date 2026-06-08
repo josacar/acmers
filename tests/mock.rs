@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::panic::catch_unwind;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
@@ -27,7 +28,13 @@ impl MockServer {
                         if let Ok(n) = stream.read(&mut buf) {
                             let req = String::from_utf8_lossy(&buf[..n]).to_string();
                             let (method, path, body, headers) = parse_request(&req);
-                            let (status, resp_body, resp_headers) = handler(&method, &path, &body, &headers);
+                            let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                handler(&method, &path, &body, &headers)
+                            }));
+                            let (status, resp_body, resp_headers) = match result {
+                                Ok(r) => r,
+                                Err(_) => (500, r#"{"error":"mock handler panic"}"#.to_string(), HashMap::new()),
+                            };
                             let mut response = format!("HTTP/1.1 {status} OK\r\n");
                             for (k, v) in &resp_headers {
                                 response.push_str(&format!("{k}: {v}\r\n"));
