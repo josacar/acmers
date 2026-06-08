@@ -137,20 +137,23 @@ fn cmd_issue(
 
         let provider = (provider_meta.create)(&env)?;
 
-        for auth in &auths {
-            let domain = &auth.identifier.value;
-            let dns_challenge = auth.challenges.iter()
-                .find(|c| c.typ == "dns-01")
-                .ok_or_else(|| Error::Dns(format!("no dns-01 challenge for {domain}")))?;
-            let token = dns_challenge.token.as_deref()
-                .ok_or_else(|| Error::Dns(format!("no token for {domain}")))?;
+    for auth in &auths {
+        let domain = &auth.identifier.value;
+        let dns_challenge = auth.challenges.iter()
+            .find(|c| c.typ == "dns-01")
+            .ok_or_else(|| Error::Dns(format!("no dns-01 challenge for {domain}")))?;
+        let token = dns_challenge.token.as_deref()
+            .ok_or_else(|| Error::Dns(format!("no token for {domain}")))?;
 
-            let txt_value = acme::account::dns_txt_value(token, &account_key.jwk_thumbprint);
-            let challenge_domain = format!("_acme-challenge.{domain}");
+        let txt_value = acme::account::dns_txt_value(token, &account_key.jwk_thumbprint);
+        let challenge_domain = format!("_acme-challenge.{domain}");
 
-            eprintln!("adding TXT record {challenge_domain} = {txt_value}");
-            provider.add_txt(main_domain, &challenge_domain, &txt_value)?;
+        eprintln!("adding TXT record {challenge_domain} = {txt_value}");
+        if let Err(e) = provider.add_txt(main_domain, &challenge_domain, &txt_value) {
+            return Err(e);
+        }
 
+        let result = (|| -> Result<(), Error> {
             if dnssleep > 0 {
                 eprintln!("waiting {dnssleep}s for DNS propagation...");
                 std::thread::sleep(std::time::Duration::from_secs(dnssleep));
@@ -162,16 +165,18 @@ fn cmd_issue(
             )?;
 
             eprintln!("waiting for validation...");
-            let result = acme::challenge::poll_challenge(
+            acme::challenge::poll_challenge(
                 &dns_challenge.url, &account.url, &account_key, &mut get_nonce,
-            );
+            )?;
+            Ok(())
+        })();
 
-            eprintln!("removing TXT record...");
-            let _ = provider.remove_txt(main_domain, &challenge_domain, &txt_value);
+        eprintln!("removing TXT record...");
+        let _ = provider.remove_txt(main_domain, &challenge_domain, &txt_value);
 
-            result?;
-            eprintln!("{domain} validated!");
-        }
+        result?;
+        eprintln!("{domain} validated!");
+    }
     }
 
     eprintln!("finalizing order...");
