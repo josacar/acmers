@@ -7,6 +7,35 @@ use std::sync::Arc;
 #[test]
 fn test_cloudflare_add_txt() {
     let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, _headers| {
+        if method == "GET" && path.contains("/dns_records") {
+            return (200, serde_json::json!({
+                "result": [{
+                    "id": "rec456",
+                    "type": "TXT",
+                    "name": "_acme-challenge.example.com",
+                    "content": "\"test-challenge-value\""
+                }],
+                "success": true
+            }).to_string(), HashMap::new());
+        }
+
+        if method == "DELETE" && path.contains("/dns_records/") {
+            return (200, serde_json::json!({"success": true}).to_string(), HashMap::new());
+        }
+
+        if method == "POST" && path.contains("/dns_records") {
+            return (200, serde_json::json!({
+                "result": {
+                    "id": "rec456",
+                    "type": "TXT",
+                    "name": "_acme-challenge.example.com",
+                    "content": "\"test-challenge-value\"",
+                    "ttl": 120
+                },
+                "success": true
+            }).to_string(), HashMap::new());
+        }
+
         if method == "GET" && path.contains("/zones/") {
             return (200, serde_json::json!({
                 "result": {
@@ -27,35 +56,6 @@ fn test_cloudflare_add_txt() {
                 }],
                 "success": true
             }).to_string(), HashMap::new());
-        }
-        
-        if method == "POST" && path.contains("/dns_records") {
-            return (200, serde_json::json!({
-                "result": {
-                    "id": "rec456",
-                    "type": "TXT",
-                    "name": "_acme-challenge.example.com",
-                    "content": "\"test-challenge-value\"",
-                    "ttl": 120
-                },
-                "success": true
-            }).to_string(), HashMap::new());
-        }
-
-        if method == "GET" && path.contains("/dns_records") {
-            return (200, serde_json::json!({
-                "result": [{
-                    "id": "rec456",
-                    "type": "TXT",
-                    "name": "_acme-challenge.example.com",
-                    "content": "\"test-challenge-value\""
-                }],
-                "success": true
-            }).to_string(), HashMap::new());
-        }
-
-        if method == "DELETE" && path.contains("/dns_records/") {
-            return (200, serde_json::json!({"success": true}).to_string(), HashMap::new());
         }
         
         (404, r#"{"success":false,"errors":[{"message":"not found"}]}"#.to_string(), HashMap::new())
