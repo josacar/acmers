@@ -7,6 +7,31 @@ use std::sync::Arc;
 #[test]
 fn test_cloudflare_add_txt() {
     let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, _headers| {
+        // Zone validation: GET /zones/{zone_id}
+        if method == "GET" && path.ends_with("/zones/zone123") {
+            return (200, serde_json::json!({
+                "result": {
+                    "id": "zone123",
+                    "name": "example.com",
+                    "status": "active"
+                },
+                "success": true
+            }).to_string(), HashMap::new());
+        }
+        
+        // Zone search: GET /zones?name=...
+        if method == "GET" && path.contains("/zones?") {
+            return (200, serde_json::json!({
+                "result": [{
+                    "id": "zone123",
+                    "name": "example.com",
+                    "status": "active"
+                }],
+                "success": true
+            }).to_string(), HashMap::new());
+        }
+
+        // List DNS records: GET /zones/{zone_id}/dns_records
         if method == "GET" && path.contains("/dns_records") {
             return (200, serde_json::json!({
                 "result": [{
@@ -19,10 +44,12 @@ fn test_cloudflare_add_txt() {
             }).to_string(), HashMap::new());
         }
 
+        // Delete DNS record: DELETE /zones/{zone_id}/dns_records/{id}
         if method == "DELETE" && path.contains("/dns_records/") {
             return (200, serde_json::json!({"success": true}).to_string(), HashMap::new());
         }
 
+        // Add DNS record: POST /zones/{zone_id}/dns_records
         if method == "POST" && path.contains("/dns_records") {
             return (200, serde_json::json!({
                 "result": {
@@ -32,28 +59,6 @@ fn test_cloudflare_add_txt() {
                     "content": "\"test-challenge-value\"",
                     "ttl": 120
                 },
-                "success": true
-            }).to_string(), HashMap::new());
-        }
-
-        if method == "GET" && path.contains("/zones/") {
-            return (200, serde_json::json!({
-                "result": {
-                    "id": "zone123",
-                    "name": "example.com",
-                    "status": "active"
-                },
-                "success": true
-            }).to_string(), HashMap::new());
-        }
-        
-        if method == "GET" && path.contains("/zones?") {
-            return (200, serde_json::json!({
-                "result": [{
-                    "id": "zone123",
-                    "name": "example.com",
-                    "status": "active"
-                }],
                 "success": true
             }).to_string(), HashMap::new());
         }
@@ -77,13 +82,7 @@ fn test_cloudflare_add_txt() {
 #[test]
 fn test_digitalocean_add_txt() {
     let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, _headers| {
-        if method == "GET" && path.contains("/domains") && !path.contains("/records") {
-            return (200, serde_json::json!({
-                "domains": [{"name": "example.com", "ttl": 1800}],
-                "meta": {"total": 1}
-            }).to_string(), HashMap::new());
-        }
-        
+        // Add DNS record: POST /v2/domains/{domain}/records
         if method == "POST" && path.contains("/records") {
             return (201, serde_json::json!({
                 "domain_record": {
@@ -95,6 +94,7 @@ fn test_digitalocean_add_txt() {
             }).to_string(), HashMap::new());
         }
 
+        // List DNS records: GET /v2/domains/{domain}/records
         if method == "GET" && path.contains("/records") {
             return (200, serde_json::json!({
                 "domain_records": [{
@@ -106,8 +106,17 @@ fn test_digitalocean_add_txt() {
             }).to_string(), HashMap::new());
         }
 
+        // Delete DNS record: DELETE /v2/domains/{domain}/records/{id}
         if method == "DELETE" && path.contains("/records/") {
             return (204, "".to_string(), HashMap::new());
+        }
+
+        // List domains: GET /v2/domains
+        if method == "GET" && path.contains("/domains") {
+            return (200, serde_json::json!({
+                "domains": [{"name": "example.com", "ttl": 1800}],
+                "meta": {"total": 1}
+            }).to_string(), HashMap::new());
         }
         
         (404, "{}".to_string(), HashMap::new())
