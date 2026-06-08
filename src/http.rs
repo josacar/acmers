@@ -81,6 +81,20 @@ impl HttpClient {
         extract_response(resp)
     }
 
+    pub fn delete_with_body(&self, url: &str, body: &[u8], content_type: &str, headers: &[(&str, &str)]) -> Result<Response, String> {
+        let url = rewrite_url(url);
+        let mut builder = ureq::http::Request::builder()
+            .method("DELETE")
+            .uri(&url)
+            .header("Content-Type", content_type);
+        for (k, v) in headers {
+            builder = builder.header(*k, *v);
+        }
+        let req = builder.body(body.to_vec()).map_err(|e| format!("HTTP DELETE {url}: {e}"))?;
+        let resp = self.agent.run(req).map_err(|e| format!("HTTP DELETE {url}: {e}"))?;
+        extract_response(resp)
+    }
+
     pub fn patch(&self, url: &str, body: &[u8], content_type: &str, headers: &[(&str, &str)]) -> Result<Response, String> {
         let url = rewrite_url(url);
         let mut req = ureq::patch(&url).header("Content-Type", content_type);
@@ -130,6 +144,10 @@ pub fn put(url: &str, body: &[u8], content_type: &str, headers: &[(&str, &str)])
 
 pub fn delete(url: &str, headers: &[(&str, &str)]) -> Result<Response, String> {
     CLIENT.delete(url, headers)
+}
+
+pub fn delete_with_body(url: &str, body: &[u8], content_type: &str, headers: &[(&str, &str)]) -> Result<Response, String> {
+    CLIENT.delete_with_body(url, body, content_type, headers)
 }
 
 pub fn patch(url: &str, body: &[u8], content_type: &str, headers: &[(&str, &str)]) -> Result<Response, String> {
