@@ -8,7 +8,6 @@ use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Easydns {
     basic_auth: String,
-    api_key: String,
 }
 
 impl DnsProvider for Easydns {
@@ -17,45 +16,62 @@ impl DnsProvider for Easydns {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["EASYDNS_Username", "EASYDNS_Password", "EASYDNS_APIKey"]
+        &["EASYDNS_Token", "EASYDNS_Key"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("EASYDNS_Username")
-            .ok_or_else(|| Error::Config("EASYDNS_Username required".into()))?.clone();
-        let password = env.get("EASYDNS_Password")
-            .ok_or_else(|| Error::Config("EASYDNS_Password required".into()))?.clone();
-        let api_key = env.get("EASYDNS_APIKey")
-            .ok_or_else(|| Error::Config("EASYDNS_APIKey required".into()))?.clone();
-        let creds = format!("{username}:{password}");
+        let token = env.get("EASYDNS_Token")
+            .ok_or_else(|| Error::Config("EASYDNS_Token required".into()))?.clone();
+        let key = env.get("EASYDNS_Key")
+            .ok_or_else(|| Error::Config("EASYDNS_Key required".into()))?.clone();
+        let creds = format!("{token}:{key}");
         let basic_auth = format!("Basic {}", base64::encode_std(creds.as_bytes()));
-        Ok(Box::new(Easydns { basic_auth, api_key }))
+        Ok(Box::new(Easydns { basic_auth }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let _ = self.resolve_zone(domain)?;
-        let url = format!("https://rest.easydns.net/domain/{domain}");
-        let form_data = format!("host={}&type=TXT&rdata={}&ttl=120",
-            urlencoding(name), urlencoding(value));
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let (zone, sub) = self.resolve_zone(name)?;
+        let url = format!("https://rest.easydns.net/zones/records/add/{zone}/TXT");
+        let body = serde_json::json!({"host": sub, "rdata": value});
         let headers = &[
             ("Authorization", self.basic_auth.as_str()),
-            ("X-API-Key", self.api_key.as_str()),
+            ("Accept", "application/json"),
         ];
-        http::post(&url, form_data.as_bytes(), "application/x-www-form-urlencoded", headers)
+        let resp = http::put(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
             .map_err(|e| Error::Provider(format!("easydns add TXT: {e}")))?;
-        Ok(())
+        if resp.body.contains("\"status\":201") || resp.body.contains("Record already exists") {
+            return Ok(());
+        }
+        Err(Error::Provider(format!("easydns add TXT: {}", resp.body)))
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let _ = self.resolve_zone(domain)?;
-        let record_id = self.find_record_id(domain, name, value)?;
+    fn remove_txt(&self, _domain: &str, name: &str, _value: &str) -> ProviderResult {
+        let (zone, sub) = self.resolve_zone(name)?;
+        let url = format!("https://rest.easydns.net/zones/records/all/{zone}/search/{sub}");
+        let headers = &[
+            ("Authorization", self.basic_auth.as_str()),
+            ("Accept", "application/json"),
+        ];
+        let resp = http::get(&url, headers)
+            .map_err(|e| Error::Provider(format!("easydns search records: {e}")))?;
+        if !resp.body.contains("\"status\":200") {
+            return Ok(());
+        }
+        let v: Value = serde_json::from_str(&resp.body)
+            .map_err(|e| Error::Json(format!("easydns search parse: {e}")))?;
+        let count = v.get("count").and_then(|c| c.as_u64()).unwrap_or(0);
+        if count == 0 {
+            return Ok(());
+        }
+        let record_id = v.get("records")
+            .and_then(|r| r.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|r| r.get("id"))
+            .and_then(|i| i.as_str())
+            .map(|s| s.to_string());
         if let Some(id) = record_id {
-            let url = format!("https://rest.easydns.net/domain/{domain}/{id}");
-            let headers = &[
-                ("Authorization", self.basic_auth.as_str()),
-                ("X-API-Key", self.api_key.as_str()),
-            ];
-            http::delete(&url, headers)
+            let del_url = format!("https://rest.easydns.net/zones/records/{zone}/{id}");
+            http::delete(&del_url, headers)
                 .map_err(|e| Error::Provider(format!("easydns delete TXT: {e}")))?;
         }
         Ok(())
@@ -63,63 +79,25 @@ impl DnsProvider for Easydns {
 }
 
 impl Easydns {
-    fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
-        let url = "https://rest.easydns.net/domain";
+    fn resolve_zone(&self, fulldomain: &str) -> Result<(String, String), Error> {
         let headers = &[
             ("Authorization", self.basic_auth.as_str()),
-            ("X-API-Key", self.api_key.as_str()),
+            ("Accept", "application/json"),
         ];
-        let resp = http::get(url, headers)
-            .map_err(|e| Error::Provider(format!("easydns list domains: {e}")))?;
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("easydns domains: {e}")))?;
-        if let Some(arr) = v.as_array() {
-            for d in arr {
-                if let Some(nm) = d.get("domain").and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        return Ok(nm.to_string());
-                    }
-                }
+        let parts: Vec<&str> = fulldomain.split('.').collect();
+        for i in 0..parts.len() {
+            let h = parts[i..].join(".");
+            if h.is_empty() {
+                break;
+            }
+            let url = format!("https://rest.easydns.net/zones/records/all/{h}");
+            let resp = http::get(&url, headers)
+                .map_err(|e| Error::Provider(format!("easydns resolve zone: {e}")))?;
+            if resp.body.contains("\"status\":200") {
+                let sub = parts[..i].join(".");
+                return Ok((h, sub));
             }
         }
-        Err(Error::Provider(format!("zone not found for {domain}")))
+        Err(Error::Provider(format!("zone not found for {fulldomain}")))
     }
-
-    fn find_record_id(&self, domain: &str, name: &str, value: &str) -> Result<Option<String>, Error> {
-        let url = format!("https://rest.easydns.net/domain/{domain}");
-        let headers = &[
-            ("Authorization", self.basic_auth.as_str()),
-            ("X-API-Key", self.api_key.as_str()),
-        ];
-        let resp = http::get(&url, headers)
-            .map_err(|e| Error::Provider(format!("easydns list records: {e}")))?;
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("easydns records: {e}")))?;
-        if let Some(records) = v.get("records").and_then(|r| r.as_array())
-            .or_else(|| v.as_array())
-        {
-            for r in records {
-                if r.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && r.get("host").and_then(|h| h.as_str()) == Some(name)
-                    && r.get("rdata").and_then(|d| d.as_str()) == Some(value)
-                {
-                    if let Some(id) = r.get("id").and_then(|i| i.as_str()) {
-                        return Ok(Some(id.to_string()));
-                    }
-                }
-            }
-        }
-        Ok(None)
-    }
-}
-
-fn urlencoding(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() * 3);
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            _ => out.push_str(&format!("%{:02X}", b)),
-        }
-    }
-    out
 }
