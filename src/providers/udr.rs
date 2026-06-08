@@ -1,15 +1,14 @@
 use std::collections::HashMap;
-use serde_json::Value;
 
-use crate::base64;
 use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
-const BASE_URL: &str = "https://api.united-domains.de/api/v1";
+const BASE_URL: &str = "https://api.domainreselling.de/api/call.cgi";
 
 pub struct Udr {
-    basic_auth: String,
+    user: String,
+    pass: String,
 }
 
 impl DnsProvider for Udr {
@@ -21,59 +20,93 @@ impl DnsProvider for Udr {
             .ok_or_else(|| Error::Config("UDR_USER required".into()))?.clone();
         let pass = env.get("UDR_PASS")
             .ok_or_else(|| Error::Config("UDR_PASS required".into()))?.clone();
-        let creds = format!("{user}:{pass}");
-        let basic_auth = format!("Basic {}", base64::encode_std(creds.as_bytes()));
-        Ok(Box::new(Udr { basic_auth }))
+        Ok(Box::new(Udr { user, pass }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let body = serde_json::json!({
-            "type": "TXT",
-            "name": rec_name,
-            "data": value,
-            "ttl": 120,
-        });
-        let url = format!("{BASE_URL}/domains/{domain}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let zone = self.resolve_zone(name)
+            .map_err(|e| Error::Provider(format!("udr zone: {e}")))?;
+        let rr = format!("{}. 30 IN TXT {}", name, value);
+        let body = format!("command=UpdateDNSZone&dnszone={}&addrr0={}", zone, rr);
+        let resp = self.api_call(&body)
             .map_err(|e| Error::Provider(format!("udr add TXT: {e}")))?;
-        if resp.status >= 400 {
-            return Err(Error::Provider(format!("udr add TXT: HTTP {} {}", resp.status, resp.body)));
-        }
+        Self::check_response(&resp.body)
+            .map_err(|e| Error::Provider(format!("udr add TXT: {e}")))?;
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
-        let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let list_url = format!("{BASE_URL}/domains/{domain}/records");
-        let resp = match http::get(&list_url, headers) {
+    fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let zone = match self.resolve_zone(name) {
+            Ok(z) => z,
+            Err(_) => return Ok(()),
+        };
+        let rr = format!("{}. 30 IN TXT {}", name, value);
+        let query_body = format!("command=QueryDNSZoneRRList&dnszone={}", zone);
+        let resp = match self.api_call(&query_body) {
             Ok(r) => r,
             Err(_) => return Ok(()),
         };
-        let v: Value = match serde_json::from_str(&resp.body) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        let records = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("records").and_then(|r| r.as_array()));
-        if let Some(records) = records {
-            for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(rec_name)
-                {
-                    if let Some(id) = record.get("id").and_then(|i| if i.is_string() { i.as_str() } else { None })
-                        .or_else(|| record.get("record_id").and_then(|i| i.as_str()))
-                    {
-                        let del_url = format!("{BASE_URL}/domains/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+        if Self::check_response(&resp.body).is_err() {
+            return Ok(());
+        }
+        if !resp.body.contains(&rr) {
+            return Ok(());
+        }
+        let del_body = format!("command=UpdateDNSZone&dnszone={}&delrr0={}", zone, rr);
+        let _ = self.api_call(&del_body);
+        Ok(())
+    }
+}
+
+impl Udr {
+    fn api_call(&self, form_data: &str) -> Result<http::Response, String> {
+        let url = format!("{}?s_login={}&s_pw={}", BASE_URL, self.user, self.pass);
+        http::post(&url, form_data.as_bytes(), "application/x-www-form-urlencoded", &[])
+    }
+
+    fn check_response(body: &str) -> Result<(), String> {
+        let code = body.lines()
+            .find_map(|line| {
+                let trimmed = line.trim();
+                if trimmed.starts_with("code") {
+                    trimmed.split('=').nth(1).map(|v| v.trim().to_string())
+                } else {
+                    None
                 }
-            }
+            })
+            .unwrap_or_default();
+        if code != "200" {
+            let desc = body.lines()
+                .find_map(|line| {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("description") {
+                        trimmed.split('=').nth(1).map(|v| v.trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or_else(|| "unknown error".to_string());
+            return Err(format!("API error code={}: {}", code, desc));
         }
         Ok(())
+    }
+
+    fn resolve_zone(&self, fulldomain: &str) -> Result<String, String> {
+        let resp = self.api_call("command=QueryDNSZoneList")?;
+        Self::check_response(&resp.body)?;
+        let parts: Vec<&str> = fulldomain.split('.').collect();
+        for i in 0..parts.len() {
+            let candidate = parts[i..].join(".");
+            if candidate.is_empty() {
+                continue;
+            }
+            if resp.body.contains(&format!("{}.", &candidate))
+                || resp.body.contains(&format!("{} ", &candidate))
+                || resp.body.contains(&format!("{}\t", &candidate))
+            {
+                return Ok(candidate);
+            }
+        }
+        Err(format!("zone not found for {}", fulldomain))
     }
 }
