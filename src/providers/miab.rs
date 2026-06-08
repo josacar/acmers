@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use serde_json::Value;
 
 use crate::base64;
 use crate::error::Error;
@@ -9,6 +8,28 @@ use crate::providers::{DnsProvider, ProviderResult};
 pub struct Miab {
     basic_auth: String,
     server: String,
+}
+
+impl Miab {
+    fn resolve_zone(&self, fulldomain: &str) -> Result<String, Error> {
+        let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
+        let url = format!("https://{}/admin/dns/zones", self.server);
+        let resp = http::get(&url, headers)
+            .map_err(|e| Error::Provider(format!("miab zones: {e}")))?;
+        if resp.status >= 400 {
+            return Err(Error::Provider(format!("miab zones: HTTP {} {}", resp.status, resp.body)));
+        }
+        let zones: Vec<String> = serde_json::from_str(&resp.body)
+            .map_err(|e| Error::Provider(format!("miab zones: {e}")))?;
+        let parts: Vec<&str> = fulldomain.split('.').collect();
+        for i in 1..parts.len() {
+            let test = parts[i..].join(".");
+            if zones.iter().any(|z| z == &test) {
+                return Ok(test);
+            }
+        }
+        Err(Error::Provider(format!("miab: no zone found for {fulldomain}")))
+    }
 }
 
 impl DnsProvider for Miab {
@@ -35,15 +56,11 @@ impl DnsProvider for Miab {
         Ok(Box::new(Miab { basic_auth, server }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        self.resolve_zone(name)?;
         let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
-        let body = serde_json::json!({
-            "qname": name,
-            "rtype": "TXT",
-            "value": value,
-        });
-        let url = format!("https://{}/admin/dns/custom/{domain}", self.server);
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
+        let url = format!("https://{}/admin/dns/custom/{}/txt", self.server, name);
+        let resp = http::post(&url, value.as_bytes(), "text/plain", headers)
             .map_err(|e| Error::Provider(format!("miab add TXT: {e}")))?;
         if resp.status >= 400 {
             return Err(Error::Provider(format!("miab add TXT: HTTP {} {}", resp.status, resp.body)));
@@ -51,33 +68,14 @@ impl DnsProvider for Miab {
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        self.resolve_zone(name)?;
         let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
-        let list_url = format!("https://{}/admin/dns/custom/{domain}", self.server);
-        let resp = match http::get(&list_url, headers) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-        let v: Value = match serde_json::from_str(&resp.body) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        if let Some(records) = v.as_array() {
-            for r in records {
-                if r.get("rtype").and_then(|t| t.as_str()) == Some("TXT")
-                    && r.get("qname").and_then(|n| n.as_str()) == Some(name)
-                    && r.get("value").and_then(|v| v.as_str()) == Some(value)
-                {
-                    let del_body = serde_json::json!({
-                        "qname": name,
-                        "rtype": "TXT",
-                        "value": "",
-                    });
-                    let del_url = format!("https://{}/admin/dns/custom/{domain}/{name}", self.server);
-                    let _ = http::post(&del_url, &serde_json::to_vec(&del_body).unwrap(), "application/json", headers);
-                    return Ok(());
-                }
-            }
+        let url = format!("https://{}/admin/dns/custom/{}/txt", self.server, name);
+        let resp = http::delete_with_body(&url, value.as_bytes(), "text/plain", headers)
+            .map_err(|e| Error::Provider(format!("miab remove TXT: {e}")))?;
+        if resp.status >= 400 {
+            return Err(Error::Provider(format!("miab remove TXT: HTTP {} {}", resp.status, resp.body)));
         }
         Ok(())
     }
