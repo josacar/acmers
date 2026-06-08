@@ -325,7 +325,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "kinghost", name: "Kinghost", env_vars: &["KINGHOST_Username", "KINGHOST_Password"], create: |env| kinghost::Kinghost::new(env) },
     ProviderMeta { slug: "knot", name: "Knot", env_vars: &["KNOT_SERVER", "KNOT_KEY"], create: |env| knot::Knot::new(env) },
     ProviderMeta { slug: "la", name: "La", env_vars: &["LA_Id", "LA_Sk"], create: |env| la::La::new(env) },
-    ProviderMeta { slug: "leaseweb", name: "Leaseweb", env_vars: &["LEASEWEB_API_KEY"], create: |env| leaseweb::Leaseweb::new(env) },
+    ProviderMeta { slug: "leaseweb", name: "Leaseweb", env_vars: &["LSW_Key"], create: |env| leaseweb::Leaseweb::new(env) },
     ProviderMeta { slug: "lexicon", name: "Lexicon", env_vars: &["LEXICON_Provider"], create: |env| lexicon::Lexicon::new(env) },
     ProviderMeta { slug: "limacity", name: "Limacity", env_vars: &["LIMACITY_APIKEY"], create: |env| limacity::Limacity::new(env) },
     ProviderMeta { slug: "linode", name: "Linode", env_vars: &["LINODE_API_KEY"], create: |env| linode::Linode::new(env) },

@@ -6,11 +6,11 @@ use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
-const BASE_URL: &str = "https://api.dns.la";
+const BASE_URL: &str = "https://api.dns.la/api";
 
 pub struct La {
-    key: String,
-    secret: String,
+    id: String,
+    sk: String,
 }
 
 impl DnsProvider for La {
@@ -19,45 +19,55 @@ impl DnsProvider for La {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["LA_ApiKey", "LA_Secret"]
+        &["LA_Id", "LA_Sk"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("LA_ApiKey")
-            .ok_or_else(|| Error::Config("LA_ApiKey required".into()))?
+        let id = env.get("LA_Id")
+            .ok_or_else(|| Error::Config("LA_Id required".into()))?
             .clone();
-        let secret = env.get("LA_Secret")
-            .ok_or_else(|| Error::Config("LA_Secret required".into()))?
+        let sk = env.get("LA_Sk")
+            .ok_or_else(|| Error::Config("LA_Sk required".into()))?
             .clone();
-        Ok(Box::new(La { key, secret }))
+        Ok(Box::new(La { id, sk }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let auth = auth_header(&self.key, &self.secret);
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
+        let auth = auth_header(&self.id, &self.sk);
+        let (domain_id, sub_domain) = self.resolve_root(domain, name)?;
 
         let body = serde_json::json!({
-            "type": "TXT",
-            "name": rec_name,
-            "content": value,
-            "ttl": 120,
+            "domainId": domain_id,
+            "type": 16,
+            "host": sub_domain,
+            "data": value,
+            "ttl": 600,
         });
-        let url = format!("{BASE_URL}/domains/{domain}/records");
+        let url = format!("{BASE_URL}/record");
         let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
             &[("Authorization", &auth)])
             .map_err(|e| Error::Provider(format!("la add TXT: {e}")))?;
         if resp.status >= 400 {
             return Err(Error::Provider(format!("la add TXT: HTTP {} {}", resp.status, resp.body)));
         }
-        Ok(())
+        let v: Value = serde_json::from_str(&resp.body)
+            .map_err(|e| Error::Provider(format!("la add TXT parse: {e}")))?;
+        if v.get("id").is_some() || v.get("msg").and_then(|m| m.as_str()) == Some("\u{4e0e}\u{5df2}\u{6709}\u{8bb0}\u{5f55}\u{51b2}\u{7a81}") {
+            return Ok(());
+        }
+        if v.get("code").and_then(|c| c.as_u64()) == Some(200) {
+            return Ok(());
+        }
+        Err(Error::Provider(format!("la add TXT: {}", resp.body)))
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
-        let auth = auth_header(&self.key, &self.secret);
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
+    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+        let auth = auth_header(&self.id, &self.sk);
+        let (domain_id, sub_domain) = self.resolve_root(domain, name)?;
 
-        let list_url = format!("{BASE_URL}/domains/{domain}/records");
-        let resp = match http::get(&list_url, &[("Authorization", &auth)]) {
+        let url = format!("{BASE_URL}/recordList?pageIndex=1&pageSize=10&domainId={}&host={}&type=16&data={}",
+            domain_id, sub_domain, value);
+        let resp = match http::get(&url, &[("Authorization", &auth)]) {
             Ok(r) => r,
             Err(_) => return Ok(()),
         };
@@ -65,36 +75,58 @@ impl DnsProvider for La {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("records").and_then(|r| r.as_array()));
-        if let Some(records) = records {
-            for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(rec_name)
-                {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/domains/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
-                        return Ok(());
-                    }
-                }
-            }
-        }
+        let record_id = v.get("id").and_then(|i| i.as_str()).map(|s| s.to_string())
+            .or_else(|| {
+                v.get("data").and_then(|d| d.as_array())
+                    .and_then(|arr| arr.first())
+                    .and_then(|r| r.get("id"))
+                    .and_then(|i| {
+                        if i.is_string() { i.as_str().map(|s| s.to_string()) }
+                        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
+                        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
+                        else { None }
+                    })
+            });
+        let record_id = match record_id {
+            Some(id) => id,
+            None => return Ok(()),
+        };
+
+        let del_url = format!("{BASE_URL}/record?id={}", record_id);
+        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
         Ok(())
     }
 }
 
-fn auth_header(user: &str, pass: &str) -> String {
-    let creds = base64::encode_std(format!("{user}:{pass}").as_bytes());
-    format!("Basic {creds}")
+impl La {
+    fn resolve_root(&self, domain: &str, name: &str) -> Result<(String, String), Error> {
+        let auth = auth_header(&self.id, &self.sk);
+        let full = format!("{}.{}", name, domain);
+        let parts: Vec<&str> = full.split('.').collect();
+        for i in 0..parts.len() {
+            let h = parts[i..].join(".");
+            let url = format!("{BASE_URL}/domain?domain={}", h);
+            let resp = http::get(&url, &[("Authorization", &auth)])
+                .map_err(|e| Error::Provider(format!("la zone resolution: {e}")))?;
+            let v: Value = serde_json::from_str(&resp.body)
+                .map_err(|e| Error::Provider(format!("la zone parse: {e}")))?;
+            if v.get("domain").is_some() {
+                if let Some(id) = v.get("id").and_then(|i| {
+                    if i.is_string() { i.as_str().map(|s| s.to_string()) }
+                    else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
+                    else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
+                    else { None }
+                }) {
+                    let sub_domain = parts[..i].join(".");
+                    return Ok((id, sub_domain));
+                }
+            }
+        }
+        Err(Error::Provider("la: could not resolve root domain".into()))
+    }
 }
 
-fn record_id(v: &Value) -> Option<String> {
-    v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
-    })
+fn auth_header(id: &str, sk: &str) -> String {
+    let creds = base64::encode_std(format!("{id}:{sk}").as_bytes());
+    format!("Basic {creds}")
 }
