@@ -1,16 +1,16 @@
 use std::collections::HashMap;
-use serde_json::Value;
 
-use crate::base64;
 use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
-const BASE_URL: &str = "https://api.opusdns.com";
+const DEFAULT_BASE_URL: &str = "https://api.opusdns.com";
+const DEFAULT_TTL: u64 = 60;
 
 pub struct Opusdns {
-    key: String,
-    secret: String,
+    api_key: String,
+    base_url: String,
+    ttl: u64,
 }
 
 impl DnsProvider for Opusdns {
@@ -19,32 +19,39 @@ impl DnsProvider for Opusdns {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["OPUSDNS_Key", "OPUSDNS_Secret"]
+        &["OPUSDNS_API_Key", "OPUSDNS_API_Endpoint", "OPUSDNS_TTL"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("OPUSDNS_Key")
-            .ok_or_else(|| Error::Config("OPUSDNS_Key required".into()))?
+        let api_key = env.get("OPUSDNS_API_Key")
+            .ok_or_else(|| Error::Config("OPUSDNS_API_Key required".into()))?
             .clone();
-        let secret = env.get("OPUSDNS_Secret")
-            .ok_or_else(|| Error::Config("OPUSDNS_Secret required".into()))?
-            .clone();
-        Ok(Box::new(Opusdns { key, secret }))
+        let base_url = env.get("OPUSDNS_API_Endpoint")
+            .map(|s| s.trim_end_matches('/').to_string())
+            .unwrap_or_else(|| DEFAULT_BASE_URL.to_string());
+        let ttl = env.get("OPUSDNS_TTL")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_TTL);
+        Ok(Box::new(Opusdns { api_key, base_url, ttl }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let auth = auth_header(&self.key, &self.secret);
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let (zone, record_name) = self.resolve_zone(name)?;
 
         let body = serde_json::json!({
-            "type": "TXT",
-            "name": rec_name,
-            "content": value,
-            "ttl": 120,
+            "ops": [{
+                "op": "upsert",
+                "record": {
+                    "name": record_name,
+                    "type": "TXT",
+                    "ttl": self.ttl,
+                    "rdata": format!("\"{}\"", value),
+                }
+            }]
         });
-        let url = format!("{BASE_URL}/domains/{domain}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &auth)])
+        let url = format!("{}/v1/dns/{}/records", self.base_url, zone);
+        let resp = http::patch(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
+            &[("X-Api-Key", &self.api_key)])
             .map_err(|e| Error::Provider(format!("opusdns add TXT: {e}")))?;
         if resp.status >= 400 {
             return Err(Error::Provider(format!("opusdns add TXT: HTTP {} {}", resp.status, resp.body)));
@@ -52,49 +59,55 @@ impl DnsProvider for Opusdns {
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
-        let auth = auth_header(&self.key, &self.secret);
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-
-        let list_url = format!("{BASE_URL}/domains/{domain}/records");
-        let resp = match http::get(&list_url, &[("Authorization", &auth)]) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-        let v: Value = match serde_json::from_str(&resp.body) {
+    fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let (zone, record_name) = match self.resolve_zone(name) {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("records").and_then(|r| r.as_array()));
-        if let Some(records) = records {
-            for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(rec_name)
-                {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/domains/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
-                        return Ok(());
-                    }
+
+        let body = serde_json::json!({
+            "ops": [{
+                "op": "remove",
+                "record": {
+                    "name": record_name,
+                    "type": "TXT",
+                    "ttl": self.ttl,
+                    "rdata": format!("\"{}\"", value),
                 }
-            }
+            }]
+        });
+        let url = format!("{}/v1/dns/{}/records", self.base_url, zone);
+        let resp = match http::patch(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
+            &[("X-Api-Key", &self.api_key)]) {
+            Ok(r) => r,
+            Err(_) => return Ok(()),
+        };
+        if resp.status >= 400 {
+            eprintln!("warning: opusdns remove TXT: HTTP {} {}", resp.status, resp.body);
         }
         Ok(())
     }
 }
 
-fn auth_header(user: &str, pass: &str) -> String {
-    let creds = base64::encode_std(format!("{user}:{pass}").as_bytes());
-    format!("Basic {creds}")
-}
+impl Opusdns {
+    fn resolve_zone(&self, fqdn: &str) -> Result<(String, String), Error> {
+        let domain = fqdn.trim_end_matches('.');
+        let parts: Vec<&str> = domain.split('.').collect();
 
-fn record_id(v: &Value) -> Option<String> {
-    v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
-    })
+        for i in 0..parts.len() {
+            let h = parts[i..].join(".");
+            let url = format!("{}/v1/dns/{}", self.base_url, h);
+            if let Ok(resp) = http::get(&url, &[("X-Api-Key", &self.api_key)]) {
+                if resp.body.contains("\"dnssec_status\"") {
+                    let record_name = if i == 0 {
+                        "@".to_string()
+                    } else {
+                        parts[..i].join(".")
+                    };
+                    return Ok((h, record_name));
+                }
+            }
+        }
+        Err(Error::Provider(format!("opusdns: no valid zone found for: {domain}")))
+    }
 }
