@@ -1,14 +1,16 @@
 use std::collections::HashMap;
-use serde_json::Value;
+use std::sync::Mutex;
 
 use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
-const BASE_URL: &str = "https://api.bhosted.nl/v1";
+const BASE_URL: &str = "https://webservices.bhosted.com/dns";
 
 pub struct Bhosted {
-    key: String,
+    username: String,
+    password: String,
+    id_cache: Mutex<HashMap<String, String>>,
 }
 
 impl DnsProvider for Bhosted {
@@ -17,112 +19,145 @@ impl DnsProvider for Bhosted {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["BHOSTED_Key"]
+        &["BHOSTED_Username", "BHOSTED_Password"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("BHOSTED_Key")
-            .ok_or_else(|| Error::Config("BHOSTED_Key required".into()))?
+        let username = env.get("BHOSTED_Username")
+            .ok_or_else(|| Error::Config("BHOSTED_Username required".into()))?
             .clone();
-        Ok(Box::new(Bhosted { key }))
+        let password = env.get("BHOSTED_Password")
+            .ok_or_else(|| Error::Config("BHOSTED_Password required".into()))?
+            .clone();
+        Ok(Box::new(Bhosted {
+            username,
+            password,
+            id_cache: Mutex::new(HashMap::new()),
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let zone_id = self.resolve_zone(domain)?;
-        let body = serde_json::json!({
-            "type": "TXT",
-            "name": rec_name,
-            "content": value,
-            "ttl": 120,
-        });
-        let url = format!("{BASE_URL}/dns/zones/{zone_id}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &format!("Bearer {}", self.key))])
+        let (sld, tld, rec_name) = self.parse_domain(domain, name)?;
+        let form = format!(
+            "user={}&password={}&tld={}&sld={}&type=TXT&name={}&content={}&ttl=300",
+            url_encode(&self.username),
+            url_encode(&self.password),
+            url_encode(&tld),
+            url_encode(&sld),
+            url_encode(&rec_name),
+            url_encode(value),
+        );
+        let url = format!("{BASE_URL}/addrecord");
+        let resp = http::post(&url, form.as_bytes(), "application/x-www-form-urlencoded", &[])
             .map_err(|e| Error::Provider(format!("bhosted add TXT: {e}")))?;
         if resp.status >= 400 {
             return Err(Error::Provider(format!("bhosted add TXT: HTTP {} {}", resp.status, resp.body)));
         }
+        if bhosted_response_has_error(&resp.body) {
+            return Err(Error::Provider(format!("bhosted add TXT: {}", resp.body)));
+        }
+        if let Some(id) = xml_value(&resp.body, "id") {
+            let cache_key = format!("{domain}|{name}|{value}");
+            self.id_cache.lock().unwrap().insert(cache_key, id);
+        }
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let zone_id = match self.resolve_zone(domain) {
-            Ok(id) => id,
-            Err(_) => return Ok(()),
+    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+        let (sld, tld, _rec_name) = self.parse_domain(domain, name)?;
+        let cache_key = format!("{domain}|{name}|{value}");
+        let rec_id = {
+            let cache = self.id_cache.lock().unwrap();
+            cache.get(&cache_key).cloned()
         };
-        let list_url = format!("{BASE_URL}/dns/zones/{zone_id}/records");
-        let auth = format!("Bearer {}", self.key);
-        let resp = match http::get(&list_url, &[("Authorization", &auth)]) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
+        let rec_id = match rec_id {
+            Some(id) => id,
+            None => return Ok(()),
         };
-        let v: Value = match serde_json::from_str(&resp.body) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        let records = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("records").and_then(|r| r.as_array()));
-        if let Some(records) = records {
-            for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(rec_name)
-                {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/dns/zones/{zone_id}/records/{id}");
-                        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
-                        return Ok(());
-                    }
-                }
-            }
+        let form = format!(
+            "user={}&password={}&tld={}&sld={}&id={}",
+            url_encode(&self.username),
+            url_encode(&self.password),
+            url_encode(&tld),
+            url_encode(&sld),
+            url_encode(&rec_id),
+        );
+        let url = format!("{BASE_URL}/delrecord");
+        let resp = http::post(&url, form.as_bytes(), "application/x-www-form-urlencoded", &[])
+            .map_err(|e| Error::Provider(format!("bhosted del TXT: {e}")))?;
+        if resp.status >= 400 {
+            return Err(Error::Provider(format!("bhosted del TXT: HTTP {} {}", resp.status, resp.body)));
         }
+        if bhosted_response_has_error(&resp.body) {
+            return Err(Error::Provider(format!("bhosted del TXT: {}", resp.body)));
+        }
+        self.id_cache.lock().unwrap().remove(&cache_key);
         Ok(())
     }
 }
 
 impl Bhosted {
-    fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
-        let auth = format!("Bearer {}", self.key);
-        let resp = http::get(&format!("{BASE_URL}/dns/zones"), &[("Authorization", &auth)])
-            .or_else(|_| http::get(&format!("{BASE_URL}/domains"), &[("Authorization", &auth)]))
-            .map_err(|e| Error::Provider(format!("bhosted list zones: {e}")))?;
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("bhosted zones: {e}")))?;
-        let zones = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("zones").and_then(|z| z.as_array()))
-            .or_else(|| v.get("domains").and_then(|d| d.as_array()));
-        if let Some(zones) = zones {
-            for z in zones {
-                if let Some(name) = z.get("name").or_else(|| z.get("domain")).and_then(|n| n.as_str()) {
-                    if domain == name || domain.ends_with(&format!(".{name}")) {
-                        if let Some(id) = zone_id(z) {
-                            return Ok(id);
-                        }
-                    }
-                }
-            }
+    fn parse_domain(&self, domain: &str, name: &str) -> Result<(String, String, String), Error> {
+        let parts: Vec<&str> = domain.rsplitn(3, '.').collect();
+        if parts.len() < 2 {
+            return Err(Error::Provider(format!("bhosted: cannot parse domain: {domain}")));
         }
-        Ok(domain.to_string())
+        let tld = parts[0];
+        let sld = parts[1];
+        let zone = format!("{sld}.{tld}");
+        let rec_name = if name == zone {
+            "@".to_string()
+        } else if let Some(prefix) = name.strip_suffix(&format!(".{zone}")) {
+            if prefix.is_empty() { "@".to_string() } else { prefix.to_string() }
+        } else {
+            name.to_string()
+        };
+        Ok((sld.to_string(), tld.to_string(), rec_name))
     }
 }
 
-fn zone_id(v: &Value) -> Option<String> {
-    v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
-    })
+fn xml_value(xml: &str, tag: &str) -> Option<String> {
+    let open = format!("<{tag}>");
+    let close = format!("</{tag}>");
+    let start = xml.find(&open)?;
+    let content_start = start + open.len();
+    let end = xml[content_start..].find(&close)?;
+    Some(xml[content_start..content_start + end].to_string())
 }
 
-fn record_id(v: &Value) -> Option<String> {
-    v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
-    })
+fn bhosted_response_has_error(body: &str) -> bool {
+    if body.is_empty() {
+        return true;
+    }
+    if body.contains("<response>") {
+        let errors = xml_value(body, "errors").unwrap_or_default();
+        let done = xml_value(body, "done").unwrap_or_default();
+        return !(errors == "0" && done == "true");
+    }
+    let lower = body.to_lowercase();
+    lower.contains("error")
+        || lower.contains("fout")
+        || lower.contains("invalid")
+        || lower.contains("failed")
+        || lower.contains("denied")
+}
+
+fn url_encode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b' ' => out.push('+'),
+            _ => {
+                out.push('%');
+                out.push(hex_char((b >> 4) & 0xf));
+                out.push(hex_char(b & 0xf));
+            }
+        }
+    }
+    out
+}
+
+fn hex_char(n: u8) -> char {
+    if n < 10 { (b'0' + n) as char } else { (b'a' + n - 10) as char }
 }
