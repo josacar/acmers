@@ -15,25 +15,24 @@ impl DnsProvider for Anx {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["ANEXIA_Token"]
+        &["ANX_Token"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("ANEXIA_Token")
-            .ok_or_else(|| Error::Config("ANEXIA_Token required".into()))?.clone();
+        let token = env.get("ANX_Token")
+            .ok_or_else(|| Error::Config("ANX_Token required".into()))?.clone();
         Ok(Box::new(Anx { token }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
         let zone = self.resolve_zone(domain)?;
-        let url = format!("https://engine.anexia-it.com/api/dns/v1/zones/{zone}/records");
+        let url = format!("https://engine.anexia-it.com/api/clouddns/v1/zone.json/{zone}/records");
         let body = serde_json::json!({
             "name": name,
             "type": "TXT",
-            "content": value,
-            "ttl": 120,
+            "rdata": value,
         });
-        let auth = format!("Bearer {}", self.token);
+        let auth = format!("Token {}", self.token);
         let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &auth)])
             .map_err(|e| Error::Provider(format!("anx add TXT: {e}")))?;
         if resp.status >= 300 {
@@ -47,8 +46,8 @@ impl DnsProvider for Anx {
             Ok(z) => z,
             Err(_) => return Ok(()),
         };
-        let auth = format!("Bearer {}", self.token);
-        let url = format!("https://engine.anexia-it.com/api/dns/v1/zones/{zone}/records");
+        let auth = format!("Token {}", self.token);
+        let url = format!("https://engine.anexia-it.com/api/clouddns/v1/zone.json/{zone}/records?name={name}&type=TXT");
         let resp = match http::get(&url, &[("Authorization", &auth)]) {
             Ok(r) => r,
             Err(_) => return Ok(()),
@@ -61,12 +60,12 @@ impl DnsProvider for Anx {
             for record in records {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
-                    && record.get("content").and_then(|c| c.as_str()) == Some(value)
+                    && record.get("rdata").and_then(|c| c.as_str()) == Some(value)
                 {
-                    if let Some(id) = record.get("id").and_then(|i| {
+                    if let Some(id) = record.get("identifier").and_then(|i| {
                         if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
                     }) {
-                        let del_url = format!("https://engine.anexia-it.com/api/dns/v1/zones/{zone}/records/{id}");
+                        let del_url = format!("https://engine.anexia-it.com/api/clouddns/v1/zone.json/{zone}/records/{id}");
                         let _ = http::delete(&del_url, &[("Authorization", &auth)]);
                     }
                 }
@@ -78,16 +77,15 @@ impl DnsProvider for Anx {
 
 impl Anx {
     fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
-        let auth = format!("Bearer {}", self.token);
-        let resp = http::get("https://engine.anexia-it.com/api/dns/v1/zones", &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("anx list zones: {e}")))?;
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("anx zones: {e}")))?;
-        if let Some(zones) = v.as_array() {
-            for zone in zones {
-                if let Some(nm) = zone.get("name").and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        return Ok(nm.to_string());
+        let auth = format!("Token {}", self.token);
+        let parts: Vec<&str> = domain.split('.').collect();
+        for i in 0..parts.len() {
+            let candidate = parts[i..].join(".");
+            let url = format!("https://engine.anexia-it.com/api/clouddns/v1/zone.json/{candidate}");
+            if let Ok(resp) = http::get(&url, &[("Authorization", &auth)]) {
+                if let Ok(v) = serde_json::from_str::<Value>(&resp.body) {
+                    if v.get("name").and_then(|n| n.as_str()) == Some(candidate.as_str()) {
+                        return Ok(candidate);
                     }
                 }
             }
