@@ -19,7 +19,7 @@ impl DnsProvider for Nsupdate {
     }
 
     fn add_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Err(Error::Provider(format!("{} not yet implemented - please contribute at https://github.com/josacar/acmers", Self::slug())))
+        Err(Error::Provider("RFC 2136 DNS UPDATE protocol requires direct socket access to port 53. Not yet implemented.".into()))
     }
 
     fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
