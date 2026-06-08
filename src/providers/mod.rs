@@ -394,7 +394,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "simply", name: "Simply", env_vars: &["SIMPLY_ApiLogin", "SIMPLY_ApiKey"], create: |env| simply::Simply::new(env) },
     ProviderMeta { slug: "sitehost", name: "Sitehost", env_vars: &["SITEHOST_ApiKey", "SITEHOST_Secret"], create: |env| sitehost::Sitehost::new(env) },
     ProviderMeta { slug: "sotoon", name: "Sotoon", env_vars: &["SOTOON_TOKEN"], create: |env| sotoon::Sotoon::new(env) },
-    ProviderMeta { slug: "spaceship", name: "Spaceship", env_vars: &["SPACESHIP_Key", "SPACESHIP_Secret"], create: |env| spaceship::Spaceship::new(env) },
+    ProviderMeta { slug: "spaceship", name: "Spaceship", env_vars: &["SPACESHIP_API_KEY", "SPACESHIP_API_SECRET", "SPACESHIP_ROOT_DOMAIN"], create: |env| spaceship::Spaceship::new(env) },
     ProviderMeta { slug: "subreg", name: "Subreg", env_vars: &["SUBREG_Username", "SUBREG_Password"], create: |env| subreg::Subreg::new(env) },
     ProviderMeta { slug: "synology_dsm", name: "SynologyDsm", env_vars: &["SYNOLOGY_DSM_HOSTNAME", "SYNOLOGY_DSM_USERNAME", "SYNOLOGY_DSM_PASSWORD"], create: |env| synology_dsm::SynologyDsm::new(env) },
     ProviderMeta { slug: "technitium", name: "Technitium", env_vars: &["TECHNITIUM_Server", "TECHNITIUM_Token"], create: |env| technitium::Technitium::new(env) },
