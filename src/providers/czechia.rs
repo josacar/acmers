@@ -1,14 +1,15 @@
 use std::collections::HashMap;
-use serde_json::Value;
 
 use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
-const BASE_URL: &str = "https://api.czechia.com/v1";
+const DEFAULT_API_BASE: &str = "https://api.czechia.com";
 
 pub struct Czechia {
-    api_key: String,
+    auth_token: String,
+    zones: Vec<String>,
+    api_base: String,
 }
 
 impl DnsProvider for Czechia {
@@ -17,65 +18,91 @@ impl DnsProvider for Czechia {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["CZECHIA_API_KEY"]
+        &["CZ_AuthorizationToken", "CZ_Zones", "CZ_API_BASE"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("CZECHIA_API_KEY")
-            .ok_or_else(|| Error::Config("CZECHIA_API_KEY required".into()))?
-            .clone();
-        Ok(Box::new(Czechia { api_key }))
+        let auth_token = env.get("CZ_AuthorizationToken")
+            .ok_or_else(|| Error::Config("CZ_AuthorizationToken required".into()))?
+            .trim()
+            .to_string();
+        let zones_raw = env.get("CZ_Zones")
+            .ok_or_else(|| Error::Config("CZ_Zones required".into()))?;
+        let zones: Vec<String> = zones_raw
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .map(|s| s.trim().trim_end_matches('.').to_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if zones.is_empty() {
+            return Err(Error::Config("CZ_Zones must contain at least one zone".into()));
+        }
+        let api_base = env
+            .get("CZ_API_BASE")
+            .map(|s| s.trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| DEFAULT_API_BASE.to_string());
+        Ok(Box::new(Czechia { auth_token, zones, api_base }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let zone_id = self.resolve_zone(domain)?;
+        let zone = self.resolve_zone(domain)?;
+        let host = Self::host_name(name, &zone);
         let body = serde_json::json!({
-            "type": "TXT",
-            "name": rec_name,
-            "content": value,
-            "ttl": 120,
+            "hostName": host,
+            "text": value,
+            "ttl": 300,
+            "publishZone": 1,
         });
-        let url = format!("{BASE_URL}/dns/zones/{zone_id}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("X-API-Key", &self.api_key)])
-            .map_err(|e| Error::Provider(format!("czechia add TXT: {e}")))?;
+        let url = format!("{}/api/DNS/{}/TXT", self.api_base, zone);
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("AuthorizationToken", &self.auth_token)],
+        )
+        .map_err(|e| Error::Provider(format!("czechia add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("czechia add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "czechia add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
+        }
+        if resp.body.contains("already exists") {
+            return Ok(());
+        }
+        if Self::is_error_response(&resp.body) {
+            return Err(Error::Provider(format!("czechia add TXT: {}", resp.body)));
         }
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let zone_id = match self.resolve_zone(domain) {
-            Ok(id) => id,
+    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+        let zone = match self.resolve_zone(domain) {
+            Ok(z) => z,
             Err(_) => return Ok(()),
         };
-        let list_url = format!("{BASE_URL}/dns/zones/{zone_id}/records");
-        let resp = match http::get(&list_url, &[("X-API-Key", &self.api_key)]) {
+        let host = Self::host_name(name, &zone);
+        let body = serde_json::json!({
+            "hostName": host,
+            "text": value,
+            "ttl": 300,
+            "publishZone": 1,
+        });
+        let url = format!("{}/api/DNS/{}/TXT", self.api_base, zone);
+        let resp = match http::delete_with_body(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("AuthorizationToken", &self.auth_token)],
+        ) {
             Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-        let v: Value = match serde_json::from_str(&resp.body) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        let records = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("records").and_then(|r| r.as_array()));
-        if let Some(records) = records {
-            for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(rec_name)
-                {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/dns/zones/{zone_id}/records/{id}");
-                        let _ = http::delete(&del_url, &[("X-API-Key", &self.api_key)]);
-                        return Ok(());
-                    }
-                }
+            Err(e) => {
+                eprintln!("warning: czechia cleanup request failed: {e}");
+                return Ok(());
             }
+        };
+        if resp.body.contains("\"isError\":true") || resp.body.contains("\"isError\": true") {
+            eprintln!("warning: czechia cleanup error: {}", resp.body);
         }
         Ok(())
     }
@@ -83,44 +110,36 @@ impl DnsProvider for Czechia {
 
 impl Czechia {
     fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
-        let resp = http::get(&format!("{BASE_URL}/dns/zones"), &[("X-API-Key", &self.api_key)])
-            .or_else(|_| http::get(&format!("{BASE_URL}/domains"), &[("X-API-Key", &self.api_key)]))
-            .map_err(|e| Error::Provider(format!("czechia list zones: {e}")))?;
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("czechia zones: {e}")))?;
-        let zones = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("zones").and_then(|z| z.as_array()))
-            .or_else(|| v.get("domains").and_then(|d| d.as_array()));
-        if let Some(zones) = zones {
-            for z in zones {
-                if let Some(name) = z.get("name").or_else(|| z.get("domain")).and_then(|n| n.as_str()) {
-                    if domain == name || domain.ends_with(&format!(".{name}")) {
-                        if let Some(id) = zone_id(z) {
-                            return Ok(id);
-                        }
-                    }
+        let fd = domain.to_lowercase().trim_end_matches('.').to_string();
+        let mut best: Option<&str> = None;
+        for z in &self.zones {
+            if fd == *z || fd.ends_with(&format!(".{z}")) {
+                if best.is_none_or(|b| z.len() > b.len()) {
+                    best = Some(z.as_str());
                 }
             }
         }
-        Ok(domain.to_string())
+        best.map(|s| s.to_string())
+            .ok_or_else(|| Error::Provider(format!("czechia: no matching zone for {domain}")))
     }
-}
 
-fn zone_id(v: &Value) -> Option<String> {
-    v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
-    })
-}
+    fn host_name(fqdn: &str, zone: &str) -> String {
+        let fd = fqdn.to_lowercase().trim_end_matches('.').to_string();
+        if fd == zone {
+            return "@".to_string();
+        }
+        if let Some(stripped) = fd.strip_suffix(&format!(".{zone}")) {
+            if stripped.is_empty() {
+                return "@".to_string();
+            }
+            return stripped.to_string();
+        }
+        fd
+    }
 
-fn record_id(v: &Value) -> Option<String> {
-    v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
-    })
+    fn is_error_response(body: &str) -> bool {
+        body.contains("\"status\":4")
+            || body.contains("\"status\":5")
+            || body.contains("\"errors\"")
+    }
 }
