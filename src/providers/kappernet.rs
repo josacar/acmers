@@ -1,15 +1,12 @@
 use std::collections::HashMap;
-use serde_json::Value;
 
-use crate::base64;
 use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
-const BASE_URL: &str = "https://api.kapper.net/v1";
-
 pub struct Kappernet {
-    auth: String,
+    api_key: String,
+    api_secret: String,
 }
 
 impl DnsProvider for Kappernet {
@@ -18,115 +15,85 @@ impl DnsProvider for Kappernet {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["KAPPERNET_Username", "KAPPERNET_Password"]
+        &["KAPPERNETDNS_Key", "KAPPERNETDNS_Secret"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("KAPPERNET_Username")
-            .ok_or_else(|| Error::Config("KAPPERNET_Username required".into()))?
+        let api_key = env.get("KAPPERNETDNS_Key")
+            .ok_or_else(|| Error::Config("KAPPERNETDNS_Key required".into()))?
             .clone();
-        let password = env.get("KAPPERNET_Password")
-            .ok_or_else(|| Error::Config("KAPPERNET_Password required".into()))?
+        let api_secret = env.get("KAPPERNETDNS_Secret")
+            .ok_or_else(|| Error::Config("KAPPERNETDNS_Secret required".into()))?
             .clone();
-        let creds = base64::encode_std(format!("{username}:{password}").as_bytes());
-        let auth = format!("Basic {creds}");
-        Ok(Box::new(Kappernet { auth }))
+        Ok(Box::new(Kappernet { api_key, api_secret }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let zone_id = self.resolve_zone(domain)?;
-        let body = serde_json::json!({
-            "type": "TXT",
-            "name": rec_name,
-            "content": value,
-            "ttl": 120,
-        });
-        let url = format!("{BASE_URL}/dns/zones/{zone_id}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &self.auth)])
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let zone = self.resolve_zone(name)?;
+        let data = format!(
+            r#"{{"name":"{}","type":"TXT","content":"{}","ttl":"300","prio":""}}"#,
+            name, value
+        );
+        let encoded_data = urlencode(&data);
+        let url = format!(
+            "https://dnspanel.kapper.net/API/1.2?APIKey={}&APISecret={}&action=new&subject={}&data={}",
+            self.api_key, self.api_secret, zone, encoded_data
+        );
+        let resp = http::get(&url, &[])
             .map_err(|e| Error::Provider(format!("kappernet add TXT: {e}")))?;
-        if resp.status >= 400 {
-            return Err(Error::Provider(format!("kappernet add TXT: HTTP {} {}", resp.status, resp.body)));
+        if !resp.body.contains(r#"{"OK":true"#) {
+            return Err(Error::Provider(format!("kappernet add TXT: {}", resp.body)));
         }
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let zone_id = match self.resolve_zone(domain) {
-            Ok(id) => id,
-            Err(_) => return Ok(()),
-        };
-        let list_url = format!("{BASE_URL}/dns/zones/{zone_id}/records");
-        let resp = match http::get(&list_url, &[("Authorization", &self.auth)]) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-        let v: Value = match serde_json::from_str(&resp.body) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        let records = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("records").and_then(|r| r.as_array()));
-        if let Some(records) = records {
-            for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(rec_name)
-                {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/dns/zones/{zone_id}/records/{id}");
-                        let _ = http::delete(&del_url, &[("Authorization", &self.auth)]);
-                        return Ok(());
-                    }
-                }
-            }
-        }
+    fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let data = format!(
+            r#"{{"name":"{}","type":"TXT","content":"{}","ttl":"300","prio":""}}"#,
+            name, value
+        );
+        let encoded_data = urlencode(&data);
+        let url = format!(
+            "https://dnspanel.kapper.net/API/1.2?APIKey={}&APISecret={}&action=del&subject={}&data={}",
+            self.api_key, self.api_secret, name, encoded_data
+        );
+        let _ = http::get(&url, &[]);
         Ok(())
     }
 }
 
 impl Kappernet {
     fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
-        let resp = http::get(&format!("{BASE_URL}/dns/zones"), &[("Authorization", &self.auth)])
-            .or_else(|_| http::get(&format!("{BASE_URL}/domains"), &[("Authorization", &self.auth)]))
-            .map_err(|e| Error::Provider(format!("kappernet list zones: {e}")))?;
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("kappernet zones: {e}")))?;
-        let zones = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("zones").and_then(|z| z.as_array()))
-            .or_else(|| v.get("domains").and_then(|d| d.as_array()));
-        if let Some(zones) = zones {
-            for z in zones {
-                if let Some(name) = z.get("name").or_else(|| z.get("domain")).and_then(|n| n.as_str()) {
-                    if domain == name || domain.ends_with(&format!(".{name}")) {
-                        if let Some(id) = zone_id(z) {
-                            return Ok(id);
-                        }
+        let parts: Vec<&str> = domain.split('.').collect();
+        for i in 1..parts.len() {
+            let h = parts[i..].join(".");
+            if h.is_empty() {
+                break;
+            }
+            let url = format!(
+                "https://dnspanel.kapper.net/API/1.2?APIKey={}&APISecret={}&action=list&subject={}",
+                self.api_key, self.api_secret, h
+            );
+            match http::get(&url, &[]) {
+                Ok(resp) => {
+                    if !resp.body.contains(r#""OK":false"#) {
+                        return Ok(h);
                     }
                 }
+                Err(_) => continue,
             }
         }
-        Ok(domain.to_string())
+        Err(Error::Provider(format!("kappernet: could not resolve zone for {domain}")))
     }
 }
 
-fn zone_id(v: &Value) -> Option<String> {
-    v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
-    })
-}
-
-fn record_id(v: &Value) -> Option<String> {
-    v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
-    })
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
 }
