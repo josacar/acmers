@@ -148,33 +148,44 @@ fn cmd_issue(
         let txt_value = acme::account::dns_txt_value(token, &account_key.jwk_thumbprint);
         let challenge_domain = format!("_acme-challenge.{domain}");
 
-        eprintln!("adding TXT record {challenge_domain} = {txt_value}");
-        if let Err(e) = provider.add_txt(main_domain, &challenge_domain, &txt_value) {
-            return Err(e);
+        struct Cleanup<'a> {
+            provider: &'a Box<dyn providers::DnsProvider>,
+            domain: String,
+            name: String,
+            value: String,
+        }
+        impl Drop for Cleanup<'_> {
+            fn drop(&mut self) {
+                let _ = self.provider.remove_txt(&self.domain, &self.name, &self.value);
+            }
         }
 
-        let result = (|| -> Result<(), Error> {
-            if dnssleep > 0 {
-                eprintln!("waiting {dnssleep}s for DNS propagation...");
-                std::thread::sleep(std::time::Duration::from_secs(dnssleep));
-            }
+        eprintln!("adding TXT record {challenge_domain} = {txt_value}");
+        provider.add_txt(main_domain, &challenge_domain, &txt_value)?;
 
-            eprintln!("signaling ACME server...");
-            acme::challenge::respond_to_challenge(
-                &dns_challenge.url, &account.url, &account_key, &mut get_nonce,
-            )?;
+        let _cleanup = Cleanup {
+            provider: &provider,
+            domain: main_domain.to_string(),
+            name: challenge_domain.clone(),
+            value: txt_value.clone(),
+        };
 
-            eprintln!("waiting for validation...");
-            acme::challenge::poll_challenge(
-                &dns_challenge.url, &account.url, &account_key, &mut get_nonce,
-            )?;
-            Ok(())
-        })();
+        if dnssleep > 0 {
+            eprintln!("waiting {dnssleep}s for DNS propagation...");
+            std::thread::sleep(std::time::Duration::from_secs(dnssleep));
+        }
 
-        eprintln!("removing TXT record...");
-        let _ = provider.remove_txt(main_domain, &challenge_domain, &txt_value);
+        eprintln!("signaling ACME server...");
+        acme::challenge::respond_to_challenge(
+            &dns_challenge.url, &account.url, &account_key, &mut get_nonce,
+        )?;
 
-        result?;
+        eprintln!("waiting for validation...");
+        acme::challenge::poll_challenge(
+            &dns_challenge.url, &account.url, &account_key, &mut get_nonce,
+        )?;
+
+        drop(_cleanup);
         eprintln!("{domain} validated!");
     }
     }
