@@ -19,7 +19,7 @@ impl DnsProvider for Hetzner {
     }
 
     fn add_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Err(Error::Provider(format!("{} not yet implemented - please contribute at https://github.com/josacar/acmers", Self::slug())))
+        Err(Error::Provider("Hetzner Robot does not manage DNS zones. Use `--dns hetznercloud` for Hetzner Cloud DNS instead.".into()))
     }
 
     fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {

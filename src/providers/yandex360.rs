@@ -19,7 +19,7 @@ impl DnsProvider for Yandex360 {
     }
 
     fn add_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Err(Error::Provider(format!("{} not yet implemented - please contribute at https://github.com/josacar/acmers", Self::slug())))
+        Err(Error::Provider("Yandex 360 requires OAuth2 client credentials. You can still use `--dns yc` for Yandex Cloud DNS instead.".into()))
     }
 
     fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
