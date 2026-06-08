@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 use serde_json::Value;
 
+use crate::base64;
 use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
-const BASE_URL: &str = "https://api.artfiles.de/v1";
+const BASE_URL: &str = "https://dcp.c.artfiles.de/api";
 
 pub struct Artfiles {
-    key: String,
-    secret: String,
+    username: String,
+    password: String,
 }
 
 impl DnsProvider for Artfiles {
@@ -18,74 +19,121 @@ impl DnsProvider for Artfiles {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["ARTFILES_Key", "ARTFILES_Secret"]
+        &["AF_API_USERNAME", "AF_API_PASSWORD"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("ARTFILES_Key")
-            .ok_or_else(|| Error::Config("ARTFILES_Key required".into()))?
+        let username = env.get("AF_API_USERNAME")
+            .ok_or_else(|| Error::Config("AF_API_USERNAME required".into()))?
             .clone();
-        let secret = env.get("ARTFILES_Secret")
-            .ok_or_else(|| Error::Config("ARTFILES_Secret required".into()))?
+        let password = env.get("AF_API_PASSWORD")
+            .ok_or_else(|| Error::Config("AF_API_PASSWORD required".into()))?
             .clone();
-        Ok(Box::new(Artfiles { key, secret }))
+        Ok(Box::new(Artfiles { username, password }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let body = serde_json::json!({
-            "type": "TXT",
-            "name": rec_name,
-            "content": value,
-            "ttl": 120,
-        });
-        let url = format!("{BASE_URL}/dns/{domain}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("X-API-Key", &self.key), ("X-API-Secret", &self.secret)])
-            .map_err(|e| Error::Provider(format!("artfiles add TXT: {e}")))?;
+    fn add_txt(&self, domain: &str, _name: &str, value: &str) -> ProviderResult {
+        let auth = self.auth_header();
+        let zone = self.get_zone(domain, &auth)?;
+        let records = self.get_txt_records(&zone, &auth)?;
+        let new_records = if records.is_empty() {
+            format!("_acme-challenge \"{}\"", value)
+        } else {
+            format!("{}\n_acme-challenge \"{}\"", records, value)
+        };
+        self.set_txt_records(&zone, &new_records, &auth)
+    }
+
+    fn remove_txt(&self, domain: &str, _name: &str, value: &str) -> ProviderResult {
+        let auth = self.auth_header();
+        let zone = self.get_zone(domain, &auth)?;
+        let records = self.get_txt_records(&zone, &auth)?;
+        let target = format!("_acme-challenge \"{}\"", value);
+        let filtered: Vec<&str> = records.lines()
+            .filter(|line| line.trim() != target)
+            .collect();
+        let new_records = filtered.join("\n");
+        self.set_txt_records(&zone, &new_records, &auth)
+    }
+}
+
+impl Artfiles {
+    fn auth_header(&self) -> String {
+        let creds = format!("{}:{}", self.username, self.password);
+        format!("Basic {}", base64::encode_std(creds.as_bytes()))
+    }
+
+    fn get_zone(&self, fqdn: &str, auth: &str) -> Result<String, Error> {
+        let resp = http::get(
+            &format!("{}/domain/get_domains.html", BASE_URL),
+            &[("Authorization", auth)],
+        ).map_err(|e| Error::Provider(format!("artfiles get domains: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("artfiles add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!("artfiles get domains: HTTP {}", resp.status)));
         }
-        Ok(())
+        let domains = &resp.body;
+        let mut current = fqdn;
+        loop {
+            if domains.contains(current) {
+                return Ok(current.to_string());
+            }
+            if let Some(pos) = current.find('.') {
+                current = &current[pos + 1..];
+            } else {
+                break;
+            }
+        }
+        Err(Error::Provider("artfiles: couldn't find root domain zone".into()))
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let list_url = format!("{BASE_URL}/dns/{domain}/records");
-        let headers: &[(&str, &str)] = &[("X-API-Key", &self.key), ("X-API-Secret", &self.secret)];
-        let resp = match http::get(&list_url, headers) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-        let v: Value = match serde_json::from_str(&resp.body) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        let records = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("records").and_then(|r| r.as_array()));
-        if let Some(records) = records {
-            for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(rec_name)
-                {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/dns/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
-                }
-            }
+    fn get_txt_records(&self, zone: &str, auth: &str) -> Result<String, Error> {
+        let url = format!("{}/dns/get_dns.html?domain={}", BASE_URL, zone);
+        let resp = http::get(&url, &[("Authorization", auth)])
+            .map_err(|e| Error::Provider(format!("artfiles get DNS: {e}")))?;
+        if !resp.body.contains("status\":\"OK") {
+            return Err(Error::Provider(format!(
+                "artfiles get DNS: {}",
+                &resp.body[..resp.body.len().min(200)]
+            )));
+        }
+        match serde_json::from_str::<Value>(&resp.body) {
+            Ok(v) => match v.get("TXT").and_then(|t| t.as_str()) {
+                Some(txt) => Ok(txt.replace("\\n", "\n")),
+                None => Ok(String::new()),
+            },
+            Err(_) => extract_txt_field(&resp.body),
+        }
+    }
+
+    fn set_txt_records(&self, zone: &str, records: &str, auth: &str) -> Result<(), Error> {
+        let encoded = urlencode(records);
+        let url = format!("{}/dns/set_dns.html?domain={}&TXT={}", BASE_URL, zone, encoded);
+        let resp = http::post(&url, b"", "application/x-www-form-urlencoded", &[("Authorization", auth)])
+            .map_err(|e| Error::Provider(format!("artfiles set DNS: {e}")))?;
+        if !resp.body.contains("status\":\"OK") {
+            return Err(Error::Provider(format!("artfiles set DNS: {}", &resp.body[..resp.body.len().min(200)])));
         }
         Ok(())
     }
 }
 
-fn record_id(v: &Value) -> Option<String> {
-    v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
-    })
+fn extract_txt_field(body: &str) -> Result<String, Error> {
+    let start = body.find("TXT\":\"")
+        .ok_or_else(|| Error::Provider("artfiles: no TXT field in response".into()))?;
+    let rest = &body[start + 6..];
+    let end = rest.find('}').unwrap_or(rest.len());
+    let raw = &rest[..end];
+    let raw = raw.strip_suffix('"').unwrap_or(raw);
+    Ok(raw.replace("\\\"", "\"").replace("\\n", "\n"))
+}
+
+fn urlencode(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
 }
