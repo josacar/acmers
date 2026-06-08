@@ -413,17 +413,17 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "vultr", name: "Vultr", env_vars: &["VULTR_API_KEY"], create: |env| vultr::Vultr::new(env) },
     ProviderMeta { slug: "websupport", name: "Websupport", env_vars: &["WS_ApiKey", "WS_ApiSecret"], create: |env| websupport::Websupport::new(env) },
     ProviderMeta { slug: "wedos", name: "Wedos", env_vars: &["WEDOS_User", "WEDOS_Password"], create: |env| wedos::Wedos::new(env) },
-    ProviderMeta { slug: "west_cn", name: "WestCn", env_vars: &["WEST_CN_Username", "WEST_CN_Password"], create: |env| west_cn::WestCn::new(env) },
+    ProviderMeta { slug: "west_cn", name: "WestCn", env_vars: &["WEST_Username", "WEST_Key"], create: |env| west_cn::WestCn::new(env) },
     ProviderMeta { slug: "wexbo", name: "Wexbo", env_vars: &["WEXBO_User", "WEXBO_Password"], create: |env| wexbo::Wexbo::new(env) },
     ProviderMeta { slug: "world4you", name: "World4you", env_vars: &["WORLD4YOU_Username", "WORLD4YOU_Password"], create: |env| world4you::World4you::new(env) },
     ProviderMeta { slug: "wts", name: "Wts", env_vars: &["WTS_Key", "WTS_Secret"], create: |env| wts::Wts::new(env) },
     ProviderMeta { slug: "yandex", name: "Yandex", env_vars: &["YANDEX_Token"], create: |env| yandex::Yandex::new(env) },
     ProviderMeta { slug: "yandex360", name: "Yandex360", env_vars: &["YANDEX360_CLIENT_ID", "YANDEX360_CLIENT_SECRET"], create: |env| yandex360::Yandex360::new(env) },
     ProviderMeta { slug: "yc", name: "Yc", env_vars: &["YC_KeyID", "YC_Secret"], create: |env| yc::Yc::new(env) },
-    ProviderMeta { slug: "zilore", name: "Zilore", env_vars: &["ZILORE_Key", "ZILORE_Secret"], create: |env| zilore::Zilore::new(env) },
+    ProviderMeta { slug: "zilore", name: "Zilore", env_vars: &["Zilore_Key"], create: |env| zilore::Zilore::new(env) },
     ProviderMeta { slug: "zone", name: "Zone", env_vars: &["ZONE_Username", "ZONE_Key"], create: |env| zone::Zone::new(env) },
-    ProviderMeta { slug: "zoneedit", name: "Zoneedit", env_vars: &["ZONEEDIT_User", "ZONEEDIT_Token"], create: |env| zoneedit::Zoneedit::new(env) },
-    ProviderMeta { slug: "zonomi", name: "Zonomi", env_vars: &["ZONOMI_Api_Key"], create: |env| zonomi::Zonomi::new(env) },
+    ProviderMeta { slug: "zoneedit", name: "Zoneedit", env_vars: &["ZONEEDIT_ID", "ZONEEDIT_Token"], create: |env| zoneedit::Zoneedit::new(env) },
+    ProviderMeta { slug: "zonomi", name: "Zonomi", env_vars: &["ZM_Key"], create: |env| zonomi::Zonomi::new(env) },
 ];
 
 pub fn find(slug: &str) -> Option<&'static ProviderMeta> {
