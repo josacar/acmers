@@ -1,11 +1,10 @@
 use std::collections::HashMap;
-use serde_json::Value;
 
 use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
-const BASE_URL: &str = "https://api.tele3.cz/api/v1";
+const BASE_URL: &str = "https://www.tele3.cz/acme/";
 
 pub struct Tele3 {
     key: String,
@@ -24,54 +23,34 @@ impl DnsProvider for Tele3 {
         Ok(Box::new(Tele3 { key, secret }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let auth = format!("sso-key {}:{}", self.key, self.secret);
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
         let body = serde_json::json!({
-            "type": "TXT",
-            "name": rec_name,
-            "content": value,
-            "ttl": 120,
+            "key": self.key,
+            "secret": self.secret,
+            "ope": "add",
+            "domain": name,
+            "value": value,
         });
-        let url = format!("{BASE_URL}/domains/{domain}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &auth)])
+        let resp = http::post(BASE_URL, &serde_json::to_vec(&body).unwrap(), "application/json", &[])
             .map_err(|e| Error::Provider(format!("tele3 add TXT: {e}")))?;
-        if resp.status >= 400 {
-            return Err(Error::Provider(format!("tele3 add TXT: HTTP {} {}", resp.status, resp.body)));
+        if resp.body.trim() != "success" {
+            return Err(Error::Provider(format!("tele3 add TXT: {}", resp.body)));
         }
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
-        let auth = format!("sso-key {}:{}", self.key, self.secret);
-        let rec_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
-        let list_url = format!("{BASE_URL}/domains/{domain}/records");
-        let resp = match http::get(&list_url, &[("Authorization", &auth)]) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-        let v: Value = match serde_json::from_str(&resp.body) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        let records = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()))
-            .or_else(|| v.get("records").and_then(|r| r.as_array()));
-        if let Some(records) = records {
-            for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(rec_name)
-                {
-                    if let Some(id) = record.get("id").and_then(|i| if i.is_string() { i.as_str() } else { None })
-                        .or_else(|| record.get("record_id").and_then(|i| i.as_str()))
-                    {
-                        let del_url = format!("{BASE_URL}/domains/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
-                        return Ok(());
-                    }
-                }
-            }
+    fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let body = serde_json::json!({
+            "key": self.key,
+            "secret": self.secret,
+            "ope": "rm",
+            "domain": name,
+            "value": value,
+        });
+        let resp = http::post(BASE_URL, &serde_json::to_vec(&body).unwrap(), "application/json", &[])
+            .map_err(|e| Error::Provider(format!("tele3 remove TXT: {e}")))?;
+        if resp.body.trim() != "success" {
+            eprintln!("warning: tele3 remove TXT: {}", resp.body);
         }
         Ok(())
     }
