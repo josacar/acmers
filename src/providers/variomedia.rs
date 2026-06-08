@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 use serde_json::Value;
 
-use crate::base64;
 use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Variomedia {
-    basic_auth: String,
+    token: String,
 }
 
 impl DnsProvider for Variomedia {
@@ -16,32 +15,37 @@ impl DnsProvider for Variomedia {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["VARIOMEDIA_Email", "VARIOMEDIA_Token"]
+        &["VARIOMEDIA_API_TOKEN"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let email = env.get("VARIOMEDIA_Email")
-            .ok_or_else(|| Error::Config("VARIOMEDIA_Email required".into()))?
+        let token = env.get("VARIOMEDIA_API_TOKEN")
+            .ok_or_else(|| Error::Config("VARIOMEDIA_API_TOKEN required".into()))?
             .clone();
-        let token = env.get("VARIOMEDIA_Token")
-            .ok_or_else(|| Error::Config("VARIOMEDIA_Token required".into()))?
-            .clone();
-        let creds = format!("{email}:{token}");
-        let basic_auth = format!("Basic {}", base64::encode_std(creds.as_bytes()));
-        Ok(Box::new(Variomedia { basic_auth }))
+        Ok(Box::new(Variomedia { token }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
-        let domain_id = self.resolve_domain(domain, headers)?;
+        let root = self.resolve_domain(domain)?;
+        let sub = Self::sub_domain(name, &root);
+        let auth = format!("token {}", self.token);
+        let headers: &[(&str, &str)] = &[
+            ("Authorization", &auth),
+            ("Accept", "application/vnd.variomedia.v1+json"),
+        ];
         let body = serde_json::to_vec(&serde_json::json!({
-            "type": "TXT",
-            "name": name,
-            "data": value,
-            "ttl": 120,
+            "data": {
+                "type": "dns-record",
+                "attributes": {
+                    "record_type": "TXT",
+                    "name": sub,
+                    "domain": root,
+                    "data": value,
+                    "ttl": 300
+                }
+            }
         })).unwrap();
-        let url = format!("https://api.variomedia.de/domains/{domain_id}/dns-records");
-        let resp = http::post(&url, &body, "application/json", headers)
+        let resp = http::post("https://api.variomedia.de/dns-records", &body, "application/vnd.api+json", headers)
             .map_err(|e| Error::Provider(format!("Variomedia add TXT: {e}")))?;
         if resp.status >= 400 {
             return Err(Error::Provider(format!("Variomedia add TXT: HTTP {} {}", resp.status, resp.body)));
@@ -50,12 +54,17 @@ impl DnsProvider for Variomedia {
     }
 
     fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
-        let domain_id = match self.resolve_domain(domain, headers) {
-            Ok(id) => id,
+        let root = match self.resolve_domain(domain) {
+            Ok(r) => r,
             Err(_) => return Ok(()),
         };
-        let list_url = format!("https://api.variomedia.de/domains/{domain_id}/dns-records");
+        let sub = Self::sub_domain(name, &root);
+        let auth = format!("token {}", self.token);
+        let headers: &[(&str, &str)] = &[
+            ("Authorization", &auth),
+            ("Accept", "application/vnd.variomedia.v1+json"),
+        ];
+        let list_url = format!("https://api.variomedia.de/dns-records?filter[domain]={}", root);
         let resp = match http::get(&list_url, headers) {
             Ok(r) => r,
             Err(_) => return Ok(()),
@@ -64,18 +73,19 @@ impl DnsProvider for Variomedia {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records: Option<&Vec<Value>> = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()));
-        if let Some(arr) = records {
+        if let Some(arr) = v.get("data").and_then(|d| d.as_array()) {
             for record in arr {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(name)
-                    && record.get("data").and_then(|d| d.as_str()) == Some(value)
-                {
+                let attrs = match record.get("attributes") {
+                    Some(a) => a,
+                    None => continue,
+                };
+                let rec_name = attrs.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                let rec_data = attrs.get("data").and_then(|d| d.as_str()).unwrap_or("");
+                if rec_name == sub && rec_data == value {
                     if let Some(id) = record.get("id").and_then(|i| {
                         if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
                     }) {
-                        let del_url = format!("https://api.variomedia.de/domains/{domain_id}/dns-records/{id}");
+                        let del_url = format!("https://api.variomedia.de/dns-records/{}", id);
                         let _ = http::delete(&del_url, headers);
                     }
                 }
@@ -86,26 +96,36 @@ impl DnsProvider for Variomedia {
 }
 
 impl Variomedia {
-    fn resolve_domain(&self, domain: &str, headers: &[(&str, &str)]) -> Result<String, Error> {
-        let resp = http::get("https://api.variomedia.de/domains", headers)
-            .map_err(|e| Error::Provider(format!("Variomedia list domains: {e}")))?;
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("Variomedia domains: {e}")))?;
-        let domains: Option<&Vec<Value>> = v.as_array()
-            .or_else(|| v.get("data").and_then(|d| d.as_array()));
-        if let Some(arr) = domains {
-            for d in arr {
-                if let Some(name) = d.get("domain").and_then(|n| n.as_str()) {
-                    if domain == name || domain.ends_with(&format!(".{name}")) {
-                        if let Some(id) = d.get("id").and_then(|i| {
-                            if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                        }) {
-                            return Ok(id);
+    fn resolve_domain(&self, domain: &str) -> Result<String, Error> {
+        let auth = format!("token {}", self.token);
+        let headers: &[(&str, &str)] = &[
+            ("Authorization", &auth),
+            ("Accept", "application/vnd.variomedia.v1+json"),
+        ];
+        let parts: Vec<&str> = domain.split('.').collect();
+        for i in 0..parts.len() {
+            let candidate = parts[i..].join(".");
+            let url = format!("https://api.variomedia.de/domains/{}", candidate);
+            if let Ok(resp) = http::get(&url, &headers) {
+                if let Ok(v) = serde_json::from_str::<Value>(&resp.body) {
+                    if let Some(data) = v.get("data") {
+                        if let Some(id) = data.get("id").and_then(|i| i.as_str()) {
+                            if id == candidate {
+                                return Ok(candidate);
+                            }
                         }
                     }
                 }
             }
         }
         Err(Error::Provider(format!("domain not found: {domain}")))
+    }
+
+    fn sub_domain<'a>(full: &'a str, root: &str) -> &'a str {
+        if let Some(stripped) = full.strip_suffix(root) {
+            stripped.trim_end_matches('.')
+        } else {
+            full
+        }
     }
 }
