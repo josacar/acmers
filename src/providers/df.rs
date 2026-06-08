@@ -19,7 +19,7 @@ impl DnsProvider for Df {
     }
 
     fn add_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Err(Error::Provider(format!("{} not yet implemented - please contribute at https://github.com/josacar/acmers", Self::slug())))
+        Err(Error::Provider("DynDNSFree.de does not support TXT record management.".into()))
     }
 
     fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {

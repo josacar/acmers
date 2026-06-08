@@ -19,7 +19,7 @@ impl DnsProvider for Openprovider {
     }
 
     fn add_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Err(Error::Provider(format!("{} not yet implemented - please contribute at https://github.com/josacar/acmers", Self::slug())))
+        Err(Error::Provider("OpenProvider legacy XML API is deprecated. Use `--dns openprovider_rest` instead.".into()))
     }
 
     fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {

@@ -19,7 +19,7 @@ impl DnsProvider for Online {
     }
 
     fn add_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Err(Error::Provider(format!("{} not yet implemented - please contribute at https://github.com/josacar/acmers", Self::slug())))
+        Err(Error::Provider("Online.net is now Scaleway. Use `--dns scaleway` instead.".into()))
     }
 
     fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
