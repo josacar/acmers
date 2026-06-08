@@ -72,6 +72,11 @@ fn cmd_issue(
     let email = email.ok_or_else(|| Error::Config("email required (use --email)".into()))?;
 
     let account = acme::account::load_or_register(&config, email)?;
+    if !account.server.is_empty() {
+        config.server = account.server.clone();
+    } else if test {
+        config.server = "https://acme-staging-v02.api.letsencrypt.org/directory".to_string();
+    }
     let account_key = crypto::load_key_from_der(&base64::decode(&account.key_b64)
         .map_err(|e| Error::Config(format!("decode account key: {e}")))?)?;
 
@@ -211,7 +216,7 @@ fn cmd_renew(domain: &str, test: bool) -> Result<(), Error> {
 }
 
 fn cmd_revoke(domain: &str) -> Result<(), Error> {
-    let config = config::Config::load()?;
+    let mut config = config::Config::load()?;
     let cert_pem = std::fs::read_to_string(config.cert_file(domain))?;
 
     let account_data = std::fs::read_to_string(config.account_file())?;
@@ -219,6 +224,9 @@ fn cmd_revoke(domain: &str) -> Result<(), Error> {
         .map_err(|e| Error::Config(format!("parse account: {e}")))?;
     let account_url = json::get_string_required(&v, &["url"])?.to_string();
     let account_pkcs8_b64 = json::get_string_required(&v, &["key"])?.to_string();
+    if let Some(s) = json::get_string(&v, &["server"]) {
+        config.server = s.to_string();
+    }
     let account_key = crypto::load_key_from_der(
         &base64::decode(&account_pkcs8_b64)
             .map_err(|e| Error::Crypto(format!("decode key: {e}")))?,

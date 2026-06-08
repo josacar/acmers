@@ -10,6 +10,7 @@ pub struct Account {
     pub url: String,
     pub key_b64: String,
     pub jwk_thumbprint: String,
+    pub server: String,
 }
 
 pub fn load_or_register(config: &Config, email: &str) -> Result<Account, Error> {
@@ -22,6 +23,7 @@ pub fn load_or_register(config: &Config, email: &str) -> Result<Account, Error> 
             url: j::get_string_required(&v, &["url"])?.to_string(),
             key_b64: j::get_string_required(&v, &["key"])?.to_string(),
             jwk_thumbprint: j::get_string_required(&v, &["jwk_thumbprint"])?.to_string(),
+            server: j::get_string(&v, &["server"]).unwrap_or(&config.server).to_string(),
         });
     }
 
@@ -31,6 +33,7 @@ pub fn load_or_register(config: &Config, email: &str) -> Result<Account, Error> 
         "url": account.url,
         "key": account.key_b64,
         "jwk_thumbprint": account.jwk_thumbprint,
+        "server": config.server,
     });
     std::fs::write(&account_path, serde_json::to_string_pretty(&data).unwrap())?;
     Ok(account)
@@ -84,6 +87,7 @@ fn register(email: &str, nonce_url: &str, account_url: &str) -> Result<Account, 
         url: kid,
         key_b64,
         jwk_thumbprint: thumbprint,
+        server: String::new(),
     })
 }
 
