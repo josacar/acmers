@@ -342,7 +342,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "mydevil", name: "Mydevil", env_vars: &["MYDEVIL_Username", "MYDEVIL_Password"], create: |env| mydevil::Mydevil::new(env) },
     ProviderMeta { slug: "mydnsjp", name: "Mydnsjp", env_vars: &["MYDNSJP_MasterID", "MYDNSJP_MasterPassword"], create: |env| mydnsjp::Mydnsjp::new(env) },
     ProviderMeta { slug: "myloc", name: "Myloc", env_vars: &["MYLOC_User", "MYLOC_Password"], create: |env| myloc::Myloc::new(env) },
-    ProviderMeta { slug: "mythic_beasts", name: "MythicBeasts", env_vars: &["MYTHIC_BEASTS_Key", "MYTHIC_BEASTS_Secret"], create: |env| mythic_beasts::MythicBeasts::new(env) },
+    ProviderMeta { slug: "mythic_beasts", name: "MythicBeasts", env_vars: &["MB_AK", "MB_AS"], create: |env| mythic_beasts::MythicBeasts::new(env) },
     ProviderMeta { slug: "namecheap", name: "Namecheap", env_vars: &["NAMECHEAP_API_KEY", "NAMECHEAP_USERNAME"], create: |env| namecheap::Namecheap::new(env) },
     ProviderMeta { slug: "namecom", name: "Namecom", env_vars: &["Namecom_Username", "Namecom_Token"], create: |env| namecom::Namecom::new(env) },
     ProviderMeta { slug: "namesilo", name: "Namesilo", env_vars: &["Namesilo_Key"], create: |env| namesilo::Namesilo::new(env) },
