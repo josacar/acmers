@@ -169,7 +169,7 @@ impl Yc {
             .map_err(|e| Error::Crypto(format!("YC parse key: {e}")))?;
 
         let rng = SystemRandom::new();
-        let mut sig = vec![0u8; key_pair.public_modulus_len()];
+        let mut sig = vec![0u8; key_pair.public().modulus_len()];
         key_pair
             .sign(
                 &RSA_PSS_SHA256,

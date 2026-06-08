@@ -26,7 +26,7 @@ impl DnsProvider for Ipv64 {
         Ok(Box::new(Ipv64 { token }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn add_txt(&self, domain: &str, _name: &str, value: &str) -> ProviderResult {
         let (zone, sub) = self.resolve_zone(domain)?;
         let zone = zone.to_lowercase();
         let sub = sub.to_lowercase();
@@ -48,7 +48,7 @@ impl DnsProvider for Ipv64 {
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn remove_txt(&self, domain: &str, _name: &str, value: &str) -> ProviderResult {
         let (zone, sub) = match self.resolve_zone(domain) {
             Ok(v) => v,
             Err(e) => { eprintln!("warning: cleanup failed: {e}"); return Ok(()); }

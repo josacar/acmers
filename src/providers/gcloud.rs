@@ -188,7 +188,7 @@ fn create_jwt(client_email: &str, private_key_pem: &str, token_uri: &str) -> Res
         .map_err(|e| Error::Crypto(format!("parse service account key: {e}")))?;
 
     let rng = SystemRandom::new();
-    let mut sig = vec![0u8; key_pair.public_modulus_len()];
+    let mut sig = vec![0u8; key_pair.public().modulus_len()];
     key_pair.sign(&RSA_PKCS1_SHA256, &rng, signing_input.as_bytes(), &mut sig)
         .map_err(|e| Error::Crypto(format!("JWT sign: {e}")))?;
 
