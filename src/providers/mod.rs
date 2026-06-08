@@ -392,7 +392,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "selfhost", name: "Selfhost", env_vars: &["SELFHOSTDNS_USERNAME", "SELFHOSTDNS_PASSWORD", "SELFHOSTDNS_MAP"], create: |env| selfhost::Selfhost::new(env) },
     ProviderMeta { slug: "shellrent", name: "Shellrent", env_vars: &["SHELLRENT_Username", "SHELLRENT_Password"], create: |env| shellrent::Shellrent::new(env) },
     ProviderMeta { slug: "simply", name: "Simply", env_vars: &["SIMPLY_ApiLogin", "SIMPLY_ApiKey"], create: |env| simply::Simply::new(env) },
-    ProviderMeta { slug: "sitehost", name: "Sitehost", env_vars: &["SITEHOST_ApiKey", "SITEHOST_Secret"], create: |env| sitehost::Sitehost::new(env) },
+    ProviderMeta { slug: "sitehost", name: "Sitehost", env_vars: &["SITEHOST_API_KEY", "SITEHOST_CLIENT_ID"], create: |env| sitehost::Sitehost::new(env) },
     ProviderMeta { slug: "sotoon", name: "Sotoon", env_vars: &["Sotoon_Token", "Sotoon_WorkspaceUUID"], create: |env| sotoon::Sotoon::new(env) },
     ProviderMeta { slug: "spaceship", name: "Spaceship", env_vars: &["SPACESHIP_API_KEY", "SPACESHIP_API_SECRET", "SPACESHIP_ROOT_DOMAIN"], create: |env| spaceship::Spaceship::new(env) },
     ProviderMeta { slug: "subreg", name: "Subreg", env_vars: &["SUBREG_Username", "SUBREG_Password"], create: |env| subreg::Subreg::new(env) },
