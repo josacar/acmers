@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use serde_json::Value;
 
 use crate::base64;
 use crate::error::Error;
@@ -16,64 +15,67 @@ impl DnsProvider for Zoneedit {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["ZONEEDIT_User", "ZONEEDIT_Token"]
+        &["ZONEEDIT_ID", "ZONEEDIT_Token"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let user = env.get("ZONEEDIT_User")
-            .ok_or_else(|| Error::Config("ZONEEDIT_User required".into()))?
+        let id = env.get("ZONEEDIT_ID")
+            .ok_or_else(|| Error::Config("ZONEEDIT_ID required".into()))?
             .clone();
         let token = env.get("ZONEEDIT_Token")
             .ok_or_else(|| Error::Config("ZONEEDIT_Token required".into()))?
             .clone();
-        let creds = format!("{user}:{token}");
+        let creds = format!("{id}:{token}");
         let basic_auth = format!("Basic {}", base64::encode_std(creds.as_bytes()));
         Ok(Box::new(Zoneedit { basic_auth }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
-        let body = serde_json::to_vec(&serde_json::json!({
-            "type": "TXT",
-            "name": name,
-            "content": value,
-            "ttl": 120,
-        })).unwrap();
-        let url = format!("https://api.cp.zoneedit.com/dns/domains/{domain}/records");
-        let resp = http::post(&url, &body, "application/json", headers)
-            .map_err(|e| Error::Provider(format!("zoneedit add TXT: {e}")))?;
-        if resp.status >= 400 {
-            return Err(Error::Provider(format!("zoneedit add TXT: HTTP {} {}", resp.status, resp.body)));
-        }
-        Ok(())
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let url = format!(
+            "https://dynamic.zoneedit.com/txt-create.php?host={}&rdata={}",
+            name, value
+        );
+        Self::api_call(&self.basic_auth, &url, false)
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
-        let list_url = format!("https://api.cp.zoneedit.com/dns/domains/{domain}/records");
-        let resp = match http::get(&list_url, headers) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-        let v: Value = match serde_json::from_str(&resp.body) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        if let Some(records) = v.as_array() {
-            for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(name)
-                    && record.get("content").and_then(|c| c.as_str()) == Some(value)
-                {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.cp.zoneedit.com/dns/domains/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                    }
+    fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let url = format!(
+            "https://dynamic.zoneedit.com/txt-delete.php?host={}&rdata={}",
+            name, value
+        );
+        Self::api_call(&self.basic_auth, &url, true)
+    }
+}
+
+impl Zoneedit {
+    fn api_call(basic_auth: &str, url: &str, is_delete: bool) -> ProviderResult {
+        let headers: &[(&str, &str)] = &[("Authorization", basic_auth)];
+        let mut tries = 3u8;
+        loop {
+            tries -= 1;
+            let resp = http::get(url, headers)
+                .map_err(|e| Error::Provider(format!("zoneedit: {e}")))?;
+            if resp.body.contains("SUCCESS") && resp.body.contains("200") {
+                if is_delete {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
                 }
+                return Ok(());
             }
+            if tries == 0 {
+                return Err(Error::Provider(format!(
+                    "zoneedit: exhausted retries, last response: {}", resp.body
+                )));
+            }
+            let wait = Self::parse_ratelimit(&resp.body).unwrap_or(10);
+            std::thread::sleep(std::time::Duration::from_secs(wait));
         }
-        Ok(())
+    }
+
+    fn parse_ratelimit(body: &str) -> Option<u64> {
+        let marker = "Minimum ";
+        let start = body.find(marker)? + marker.len();
+        let rest = &body[start..];
+        let end = rest.find(' ')?;
+        rest[..end].parse::<u64>().ok()
     }
 }
