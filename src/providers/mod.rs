@@ -389,7 +389,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "schlundtech", name: "Schlundtech", env_vars: &["SCHLUNDTECH_Username", "SCHLUNDTECH_Password"], create: |env| schlundtech::Schlundtech::new(env) },
     ProviderMeta { slug: "sdns", name: "Sdns", env_vars: &["SDNS_Username", "SDNS_Password"], create: |env| sdns::Sdns::new(env) },
     ProviderMeta { slug: "selectel", name: "Selectel", env_vars: &["SELECTEL_Username", "SELECTEL_Password"], create: |env| selectel::Selectel::new(env) },
-    ProviderMeta { slug: "selfhost", name: "Selfhost", env_vars: &["SELFHOST_Username", "SELFHOST_Password"], create: |env| selfhost::Selfhost::new(env) },
+    ProviderMeta { slug: "selfhost", name: "Selfhost", env_vars: &["SELFHOSTDNS_USERNAME", "SELFHOSTDNS_PASSWORD", "SELFHOSTDNS_MAP"], create: |env| selfhost::Selfhost::new(env) },
     ProviderMeta { slug: "shellrent", name: "Shellrent", env_vars: &["SHELLRENT_Username", "SHELLRENT_Password"], create: |env| shellrent::Shellrent::new(env) },
     ProviderMeta { slug: "simply", name: "Simply", env_vars: &["SIMPLY_ApiLogin", "SIMPLY_ApiKey"], create: |env| simply::Simply::new(env) },
     ProviderMeta { slug: "sitehost", name: "Sitehost", env_vars: &["SITEHOST_ApiKey", "SITEHOST_Secret"], create: |env| sitehost::Sitehost::new(env) },
