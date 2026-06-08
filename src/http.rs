@@ -3,6 +3,24 @@ use std::sync::LazyLock;
 
 pub static CLIENT: LazyLock<HttpClient> = LazyLock::new(HttpClient::new);
 
+pub static TEST_BASE_URL: LazyLock<std::sync::Mutex<Option<String>>> = LazyLock::new(|| std::sync::Mutex::new(None));
+
+pub fn set_test_base(url: &str) {
+    *TEST_BASE_URL.lock().unwrap() = Some(url.to_string());
+}
+
+fn rewrite_url(url: &str) -> String {
+    if let Some(base) = TEST_BASE_URL.lock().unwrap().as_ref() {
+        let parsed = url.split('/').collect::<Vec<_>>();
+        if parsed.len() >= 4 {
+            let path: String = parsed[3..].join("/");
+            return format!("{base}/{path}");
+        }
+        return base.clone();
+    }
+    url.to_string()
+}
+
 pub struct HttpClient {
     agent: ureq::Agent,
 }
@@ -17,7 +35,8 @@ impl HttpClient {
     }
 
     pub fn get(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, String> {
-        let mut req = self.agent.get(url);
+        let url = rewrite_url(url);
+        let mut req = self.agent.get(&url);
         for (k, v) in headers {
             req = req.header(*k, *v);
         }
@@ -26,13 +45,15 @@ impl HttpClient {
     }
 
     pub fn head(&self, url: &str) -> Result<Response, String> {
-        let resp = self.agent.head(url).call()
+        let url = rewrite_url(url);
+        let resp = self.agent.head(&url).call()
             .map_err(|e| format!("HTTP HEAD {url}: {e}"))?;
         extract_response(resp)
     }
 
     pub fn post(&self, url: &str, body: &[u8], content_type: &str, headers: &[(&str, &str)]) -> Result<Response, String> {
-        let mut req = self.agent.post(url).header("Content-Type", content_type);
+        let url = rewrite_url(url);
+        let mut req = self.agent.post(&url).header("Content-Type", content_type);
         for (k, v) in headers {
             req = req.header(*k, *v);
         }
@@ -41,7 +62,8 @@ impl HttpClient {
     }
 
     pub fn put(&self, url: &str, body: &[u8], content_type: &str, headers: &[(&str, &str)]) -> Result<Response, String> {
-        let mut req = self.agent.put(url).header("Content-Type", content_type);
+        let url = rewrite_url(url);
+        let mut req = self.agent.put(&url).header("Content-Type", content_type);
         for (k, v) in headers {
             req = req.header(*k, *v);
         }
@@ -50,7 +72,8 @@ impl HttpClient {
     }
 
     pub fn delete(&self, url: &str, headers: &[(&str, &str)]) -> Result<Response, String> {
-        let mut req = self.agent.delete(url);
+        let url = rewrite_url(url);
+        let mut req = ureq::delete(&url);
         for (k, v) in headers {
             req = req.header(*k, *v);
         }
@@ -59,7 +82,8 @@ impl HttpClient {
     }
 
     pub fn patch(&self, url: &str, body: &[u8], content_type: &str, headers: &[(&str, &str)]) -> Result<Response, String> {
-        let mut req = self.agent.patch(url).header("Content-Type", content_type);
+        let url = rewrite_url(url);
+        let mut req = ureq::patch(&url).header("Content-Type", content_type);
         for (k, v) in headers {
             req = req.header(*k, *v);
         }
