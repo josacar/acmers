@@ -25,7 +25,7 @@ impl DnsProvider for Dreamhost {
         Ok(Box::new(Dreamhost { api_key }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
         let url = format!(
             "https://api.dreamhost.com/?key={}&cmd=dns-add_record&format=json&record={}&type=TXT&value={}",
             self.api_key,
@@ -42,7 +42,7 @@ impl DnsProvider for Dreamhost {
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
         let url = format!(
             "https://api.dreamhost.com/?key={}&cmd=dns-remove_record&format=json&record={}&type=TXT&value={}",
             self.api_key,

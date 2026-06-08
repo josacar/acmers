@@ -43,7 +43,7 @@ impl DnsProvider for Rcode0 {
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
         let headers: &[(&str, &str)] = &[("Authorization", &format!("Bearer {}", self.token))];
         let zone = match self.resolve_zone(domain, headers) {
             Ok(z) => z,

@@ -51,7 +51,7 @@ impl DnsProvider for Pointhq {
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
         let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
         let zone_id = match self.resolve_zone(domain, headers) {
             Ok(id) => id,

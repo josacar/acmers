@@ -6,7 +6,6 @@ use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct HeDdns {
     key: String,
-    secret: String,
 }
 
 impl DnsProvider for HeDdns {
@@ -22,10 +21,7 @@ impl DnsProvider for HeDdns {
         let key = env.get("HE_DDNS_Key")
             .ok_or_else(|| Error::Config("HE_DDNS_Key required".into()))?
             .clone();
-        let secret = env.get("HE_DDNS_Secret")
-            .ok_or_else(|| Error::Config("HE_DDNS_Secret required".into()))?
-            .clone();
-        Ok(Box::new(HeDdns { key, secret }))
+        Ok(Box::new(HeDdns { key }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {

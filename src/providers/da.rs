@@ -51,7 +51,7 @@ impl DnsProvider for Da {
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
         let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
         let full_name = format!("{name}.{domain}.");
         let select_url = format!(
