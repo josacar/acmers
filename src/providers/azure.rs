@@ -42,7 +42,7 @@ impl DnsProvider for Azure {
         Ok(Box::new(Azure { subscription_id, tenant_id, app_id, client_secret }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn add_txt(&self, domain: &str, _name: &str, value: &str) -> ProviderResult {
         let token = get_token(&self.tenant_id, &self.app_id, &self.client_secret)?;
         let auth = format!("Bearer {token}");
         let (domain_id, sub_domain) = self.resolve_zone(domain, &auth)?;
@@ -85,7 +85,7 @@ impl DnsProvider for Azure {
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn remove_txt(&self, domain: &str, _name: &str, value: &str) -> ProviderResult {
         let token = match get_token(&self.tenant_id, &self.app_id, &self.client_secret) {
             Ok(t) => t,
             Err(_) => return Ok(()),
