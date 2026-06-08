@@ -180,7 +180,8 @@ fn cmd_issue(
     }
 
     eprintln!("finalizing order...");
-    let csr = crypto::create_csr(domains, &account_key.pkcs8_bytes)?;
+    let cert_key = crypto::generate_p256_key()?;
+    let csr = crypto::create_csr(domains, &cert_key.pkcs8_bytes)?;
     let cert_url = acme::order::finalize_order(
         &csr, &order.finalize, &account.url, &account_key, &mut get_nonce,
     )?;
@@ -193,7 +194,7 @@ fn cmd_issue(
     let domain_dir = config.domain_dir(main_domain);
     std::fs::create_dir_all(&domain_dir)?;
     std::fs::write(config.cert_file(main_domain), &cert_pem)?;
-    std::fs::write(config.key_file(main_domain), &account_key.pkcs8_bytes)?;
+    std::fs::write(config.key_file(main_domain), &cert_key.pkcs8_bytes)?;
     std::fs::write(config.fullchain_file(main_domain), &cert_pem)?;
 
     save_renewal_config(&config, main_domain, provider_slug, email, test, standalone)?;
