@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use serde_json::Value;
 
 use crate::error::Error;
 use crate::http;
@@ -27,64 +26,29 @@ impl DnsProvider for Bookmyname {
         Ok(Box::new(Bookmyname { username, password }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let _ = self.resolve_zone(domain)?;
-        let url = "https://api.bookmyname.com/domain/updaterecord/dns";
-        let body = serde_json::json!({
-            "apiuser": self.username,
-            "apipassword": self.password,
-            "domain": domain,
-            "subdomain": name,
-            "type": "TXT",
-            "content": value,
-            "ttl": 120,
-        });
-        let resp = http::post(url, &serde_json::to_vec(&body).unwrap(), "application/json", &[])
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let url = format!(
+            "https://{}:{}@www.bookmyname.com/dyndns/?hostname={}&type=TXT&ttl=300&do=add&value={}",
+            self.username, self.password, name, value
+        );
+        let resp = http::get(&url, &[])
             .map_err(|e| Error::Provider(format!("bookmyname add TXT: {e}")))?;
-        if resp.status != 200 {
-            return Err(Error::Provider(format!("bookmyname add TXT: HTTP {} {}", resp.status, resp.body)));
+        if !resp.body.starts_with("good: update done, cid ") {
+            return Err(Error::Provider(format!("bookmyname add TXT: {}", resp.body)));
         }
         Ok(())
     }
 
-    fn remove_txt(&self, domain: &str, name: &str, _value: &str) -> ProviderResult {
-        let _ = self.resolve_zone(domain)?;
-        let url = "https://api.bookmyname.com/domain/updaterecord/dns";
-        let body = serde_json::json!({
-            "apiuser": self.username,
-            "apipassword": self.password,
-            "domain": domain,
-            "subdomain": name,
-            "type": "TXT",
-            "content": "",
-            "ttl": 120,
-        });
-        http::post(url, &serde_json::to_vec(&body).unwrap(), "application/json", &[])
-            .map_err(|e| Error::Provider(format!("bookmyname delete TXT: {e}")))?;
-        Ok(())
-    }
-}
-
-impl Bookmyname {
-    fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
-        let url = "https://api.bookmyname.com/domain/list";
-        let body = serde_json::json!({
-            "apiuser": self.username,
-            "apipassword": self.password,
-        });
-        let resp = http::post(url, &serde_json::to_vec(&body).unwrap(), "application/json", &[])
-            .map_err(|e| Error::Provider(format!("bookmyname list domains: {e}")))?;
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("bookmyname domains: {e}")))?;
-        if let Some(arr) = v.as_array() {
-            for d in arr {
-                if let Some(nm) = d.as_str() {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        return Ok(nm.to_string());
-                    }
-                }
-            }
+    fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let url = format!(
+            "https://{}:{}@www.bookmyname.com/dyndns/?hostname={}&type=TXT&ttl=300&do=remove&value={}",
+            self.username, self.password, name, value
+        );
+        let resp = http::get(&url, &[])
+            .map_err(|e| Error::Provider(format!("bookmyname remove TXT: {e}")))?;
+        if !resp.body.starts_with("good: remove done 1, cid ") {
+            eprintln!("warning: bookmyname remove TXT: {}", resp.body);
         }
-        Err(Error::Provider(format!("zone not found for {domain}")))
+        Ok(())
     }
 }
