@@ -1,12 +1,13 @@
 use std::collections::HashMap;
-use serde_json::Value;
 
 use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Firestorm {
+    api_user: String,
     api_key: String,
+    base_url: String,
 }
 
 impl DnsProvider for Firestorm {
@@ -15,89 +16,60 @@ impl DnsProvider for Firestorm {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["FIRESTORM_Key"]
+        &["FST_Key", "FST_Secret", "FST_Url"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("FIRESTORM_Key")
-            .ok_or_else(|| Error::Config("FIRESTORM_Key required".into()))?
+        let api_user = env.get("FST_Key")
+            .ok_or_else(|| Error::Config("FST_Key required".into()))?
             .clone();
-        Ok(Box::new(Firestorm { api_key }))
+        let api_key = env.get("FST_Secret")
+            .ok_or_else(|| Error::Config("FST_Secret required".into()))?
+            .clone();
+        let base_url = env.get("FST_Url")
+            .cloned()
+            .unwrap_or_else(|| "https://api.firestorm.ch/acme-dns".into());
+        Ok(Box::new(Firestorm { api_user, api_key, base_url }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let zone_id = self.resolve_zone(domain)?;
-        let headers: &[(&str, &str)] = &[("X-API-Key", &self.api_key)];
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let subdomain = name.strip_prefix("_acme-challenge.").unwrap_or(name);
+        let url = format!("{}/update", self.base_url);
+        let headers: &[(&str, &str)] = &[
+            ("X-Api-User", &self.api_user),
+            ("X-Api-Key", &self.api_key),
+        ];
         let body = serde_json::json!({
-            "type": "TXT",
-            "name": name,
-            "content": value,
-            "ttl": 120,
+            "subdomain": subdomain,
+            "txt": value,
         });
-        let url = format!("https://api.firestorm.ch/v1/zones/{zone_id}/records");
         let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
             .map_err(|e| Error::Provider(format!("firestorm add TXT: {e}")))?;
         if resp.status >= 400 {
             return Err(Error::Provider(format!("firestorm add TXT: HTTP {} {}", resp.status, resp.body)));
         }
-        Ok(())
-    }
-
-    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let zone_id = match self.resolve_zone(domain) {
-            Ok(id) => id,
-            Err(_) => return Ok(()),
-        };
-        let headers: &[(&str, &str)] = &[("X-API-Key", &self.api_key)];
-        let list_url = format!("https://api.firestorm.ch/v1/zones/{zone_id}/records");
-        let resp = match http::get(&list_url, headers) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-        let v: Value = match serde_json::from_str(&resp.body) {
-            Ok(v) => v,
-            Err(_) => return Ok(()),
-        };
-        if let Some(records) = v.as_array() {
-            for r in records {
-                if r.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && r.get("name").and_then(|n| n.as_str()) == Some(name)
-                    && r.get("content").and_then(|c| c.as_str()) == Some(value)
-                {
-                    if let Some(id) = r.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.firestorm.ch/v1/zones/{zone_id}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
-                }
-            }
+        if !resp.body.contains(value) {
+            return Err(Error::Provider(format!("firestorm add TXT: unexpected response: {}", resp.body)));
         }
         Ok(())
     }
-}
 
-impl Firestorm {
-    fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
-        let headers: &[(&str, &str)] = &[("X-API-Key", &self.api_key)];
-        let resp = http::get("https://api.firestorm.ch/v1/zones", headers)
-            .map_err(|e| Error::Provider(format!("firestorm list zones: {e}")))?;
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("firestorm parse zones: {e}")))?;
-        if let Some(arr) = v.as_array() {
-            for z in arr {
-                if let Some(nm) = z.get("name").or_else(|| z.get("domain")).and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        if let Some(id) = z.get("id").and_then(|i| {
-                            if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                        }) {
-                            return Ok(id);
-                        }
-                    }
-                }
-            }
+    fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
+        let subdomain = name.strip_prefix("_acme-challenge.").unwrap_or(name);
+        let url = format!("{}/remove", self.base_url);
+        let headers: &[(&str, &str)] = &[
+            ("X-Api-User", &self.api_user),
+            ("X-Api-Key", &self.api_key),
+        ];
+        let body = serde_json::json!({
+            "subdomain": subdomain,
+            "txt": value,
+        });
+        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
+            .map_err(|e| Error::Provider(format!("firestorm remove TXT: {e}")))?;
+        if resp.status >= 400 {
+            return Err(Error::Provider(format!("firestorm remove TXT: HTTP {} {}", resp.status, resp.body)));
         }
-        Err(Error::Provider(format!("zone not found for {domain}")))
+        Ok(())
     }
 }
