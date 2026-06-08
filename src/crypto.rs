@@ -113,8 +113,13 @@ pub fn create_csr(
     let key = KeyPair::from_pkcs8_der_and_sign_algo(&pkcs8_der, &PKCS_ECDSA_P256_SHA256)
         .map_err(|e| Error::Crypto(format!("load key for CSR: {e}")))?;
 
-    let params = rcgen::CertificateParams::new(domains.to_vec())
+    let mut params = rcgen::CertificateParams::new(domains.to_vec())
         .map_err(|e| Error::Crypto(format!("cert params: {e}")))?;
+
+    params.distinguished_name.push(
+        rcgen::DnType::CommonName,
+        domains.first().cloned().unwrap_or_default(),
+    );
 
     let csr = params.serialize_request(&key)
         .map_err(|e| Error::Crypto(format!("CSR creation: {e}")))?;
