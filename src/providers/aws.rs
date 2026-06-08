@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::thread;
+use std::time::Duration;
 
 use ring::digest::{digest, SHA256};
 use ring::hmac;
@@ -8,9 +10,10 @@ use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
-const ENDPOINT: &str = "https://route53.amazonaws.com/2013-04-01";
+const ENDPOINT: &str = "https://route53.amazonaws.com";
 const REGION: &str = "us-east-1";
 const SERVICE: &str = "route53";
+const API_VERSION: &str = "2013-04-01";
 
 pub struct Route53 {
     access_key: String,
@@ -38,11 +41,24 @@ impl DnsProvider for Route53 {
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
         let zone_id = self.resolve_zone(domain)?;
-        let body = format_xml(name, value, "UPSERT");
-        let resp = self.signed_request("POST", &format!("/hostedzone/{zone_id}/rrset/"), body.as_bytes(), "application/xml")?;
+        thread::sleep(Duration::from_secs(1));
+
+        let fqdn = if name.ends_with('.') { name.to_string() } else { format!("{name}.") };
+        let existing = self.get_existing_txt_values(&zone_id, &fqdn)?;
+        thread::sleep(Duration::from_secs(1));
+
+        if existing.iter().any(|v| v == value) {
+            return Ok(());
+        }
+
+        let mut values = existing;
+        values.push(value.to_string());
+        let body = format_xml_multi(&fqdn, &values, "UPSERT");
+        let resp = self.signed_request("POST", &format!("/{API_VERSION}/hostedzone/{zone_id}/rrset/"), "", body.as_bytes(), "application/xml")?;
         if resp.status >= 300 {
             return Err(Error::Provider(format!("Route53 add TXT: {} {}", resp.status, resp.body)));
         }
+        thread::sleep(Duration::from_secs(1));
         Ok(())
     }
 
@@ -51,13 +67,35 @@ impl DnsProvider for Route53 {
             Ok(z) => z,
             Err(_) => return Ok(()),
         };
-        let body = format_xml(name, value, "DELETE");
-        let _ = self.signed_request("POST", &format!("/hostedzone/{zone_id}/rrset/"), body.as_bytes(), "application/xml");
+        thread::sleep(Duration::from_secs(1));
+
+        let fqdn = if name.ends_with('.') { name.to_string() } else { format!("{name}.") };
+        let existing = match self.get_existing_txt_values(&zone_id, &fqdn) {
+            Ok(v) => v,
+            Err(_) => return Ok(()),
+        };
+        thread::sleep(Duration::from_secs(1));
+
+        if existing.is_empty() {
+            return Ok(());
+        }
+
+        let remaining: Vec<String> = existing.into_iter().filter(|v| v != value).collect();
+        if remaining.is_empty() {
+            return Ok(());
+        }
+
+        let body = format_xml_multi(&fqdn, &remaining, "DELETE");
+        let _ = self.signed_request("POST", &format!("/{API_VERSION}/hostedzone/{zone_id}/rrset/"), "", body.as_bytes(), "application/xml");
+        thread::sleep(Duration::from_secs(1));
         Ok(())
     }
 }
 
-fn format_xml(name: &str, value: &str, action: &str) -> String {
+fn format_xml_multi(name: &str, values: &[String], action: &str) -> String {
+    let records: String = values.iter().map(|v| {
+        format!("<ResourceRecord><Value>\"{}\"</Value></ResourceRecord>", v)
+    }).collect();
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <ChangeResourceRecordSetsRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
@@ -68,11 +106,9 @@ fn format_xml(name: &str, value: &str, action: &str) -> String {
         <ResourceRecordSet>
           <Name>{name}</Name>
           <Type>TXT</Type>
-          <TTL>60</TTL>
+          <TTL>300</TTL>
           <ResourceRecords>
-            <ResourceRecord>
-              <Value>"{value}"</Value>
-            </ResourceRecord>
+            {records}
           </ResourceRecords>
         </ResourceRecordSet>
       </Change>
@@ -84,8 +120,6 @@ fn format_xml(name: &str, value: &str, action: &str) -> String {
 
 impl Route53 {
     fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
-        let resp = self.signed_request("GET", "/hostedzone", b"", "application/xml")?;
-        let body = &resp.body;
         let mut search = domain.to_string();
         if !search.ends_with('.') {
             search.push('.');
@@ -93,28 +127,55 @@ impl Route53 {
 
         let mut best_len = 0;
         let mut best_id = String::new();
-        let xml = body.as_bytes();
-        let mut pos = 0;
-        while pos < xml.len() {
-            if let Some(start) = find_tag_start(xml, pos, b"<Id>") {
-                let id_end = find_tag_end(xml, start, b"</Id>").unwrap_or(xml.len());
-                let id_raw = &xml[start + 4..id_end];
-                let id_str = std::str::from_utf8(id_raw).unwrap_or("");
-                let id = id_str.strip_prefix("/hostedzone/").unwrap_or(id_str);
+        let mut marker: Option<String> = None;
 
-                let name_start = find_tag_start(xml, id_end, b"<Name>").unwrap_or(xml.len());
-                let name_end = find_tag_end(xml, name_start, b"</Name>").unwrap_or(xml.len());
-                let name_raw = &xml[name_start + 6..name_end];
-                let name_str = std::str::from_utf8(name_raw).unwrap_or("");
+        loop {
+            let qs = match &marker {
+                Some(m) => format!("marker={m}"),
+                None => String::new(),
+            };
+            let resp = self.signed_request("GET", &format!("/{API_VERSION}/hostedzone"), &qs, b"", "application/xml")?;
+            let body = &resp.body;
+            let xml = body.as_bytes();
 
-                if search.ends_with(name_str) && name_str.len() > best_len {
-                    best_len = name_str.len();
-                    best_id = id.to_string();
+            let mut pos = 0;
+            while pos < xml.len() {
+                if let Some(hz_start) = find_tag_start(xml, pos, b"<HostedZone>") {
+                    let hz_end = find_tag_end(xml, hz_start, b"</HostedZone>").unwrap_or(xml.len());
+                    let hz_data = &xml[hz_start..hz_end];
+
+                    let id = match extract_tag_value_str(hz_data, b"<Id>", b"</Id>") {
+                        Some(id_raw) => id_raw.strip_prefix("/hostedzone/").unwrap_or(&id_raw).to_string(),
+                        None => { pos = hz_end; continue; }
+                    };
+
+                    let name_str = match extract_tag_value_str(hz_data, b"<Name>", b"</Name>") {
+                        Some(n) => n,
+                        None => { pos = hz_end; continue; }
+                    };
+
+                    let is_private = match extract_tag_value_str(hz_data, b"<PrivateZone>", b"</PrivateZone>") {
+                        Some(p) => p.eq_ignore_ascii_case("true"),
+                        None => false,
+                    };
+
+                    if !is_private && search.ends_with(&name_str) && name_str.len() > best_len {
+                        best_len = name_str.len();
+                        best_id = id;
+                    }
+                    pos = hz_end;
+                } else {
+                    break;
                 }
-                pos = name_end;
-            } else {
-                break;
             }
+
+            if contains_bytes(xml, b"<IsTruncated>true") {
+                if let Some(next) = extract_tag_value_str(xml, b"<NextMarker>", b"</NextMarker>") {
+                    marker = Some(next);
+                    continue;
+                }
+            }
+            break;
         }
 
         if best_id.is_empty() {
@@ -123,7 +184,49 @@ impl Route53 {
         Ok(best_id)
     }
 
-    fn signed_request(&self, method: &str, uri: &str, payload: &[u8], content_type: &str) -> Result<http::Response, Error> {
+    fn get_existing_txt_values(&self, zone_id: &str, fqdn: &str) -> Result<Vec<String>, Error> {
+        let qs = format!("name={fqdn}&type=TXT");
+        let resp = self.signed_request("GET", &format!("/{API_VERSION}/hostedzone/{zone_id}/rrset"), &qs, b"", "application/xml")?;
+        if resp.status >= 300 {
+            return Err(Error::Provider(format!("Route53 get TXT: {} {}", resp.status, resp.body)));
+        }
+
+        let xml = resp.body.as_bytes();
+        let mut values = Vec::new();
+        let name_tag = format!("<Name>{fqdn}</Name>");
+
+        let mut pos = 0;
+        while pos < xml.len() {
+            if let Some(rrs_start) = find_tag_start(xml, pos, b"<ResourceRecordSet>") {
+                let rrs_end = find_tag_end(xml, rrs_start, b"</ResourceRecordSet>").unwrap_or(xml.len());
+                let rrs_data = &xml[rrs_start..rrs_end];
+
+                if contains_bytes(rrs_data, name_tag.as_bytes()) {
+                    let mut rr_pos = 0;
+                    while rr_pos < rrs_data.len() {
+                        if let Some(rr_start) = find_tag_start(rrs_data, rr_pos, b"<ResourceRecord>") {
+                            let rr_end = find_tag_end(rrs_data, rr_start, b"</ResourceRecord>").unwrap_or(rrs_data.len());
+                            let rr_data = &rrs_data[rr_start..rr_end];
+                            if let Some(val) = extract_tag_value_str(rr_data, b"<Value>", b"</Value>") {
+                                let cleaned = val.trim_matches('"').to_string();
+                                values.push(cleaned);
+                            }
+                            rr_pos = rr_end;
+                        } else {
+                            break;
+                        }
+                    }
+                    break;
+                }
+                pos = rrs_end;
+            } else {
+                break;
+            }
+        }
+        Ok(values)
+    }
+
+    fn signed_request(&self, method: &str, uri: &str, query_string: &str, payload: &[u8], content_type: &str) -> Result<http::Response, Error> {
         let now = time::OffsetDateTime::now_utc();
         let (y, m, d) = (now.year(), now.month() as u8, now.day());
         let (h, mi, s) = (now.hour(), now.minute(), now.second());
@@ -138,7 +241,7 @@ impl Route53 {
         let signed_headers = "content-type;host;x-amz-content-sha256;x-amz-date";
 
         let canonical_request = format!(
-            "{method}\n{uri}\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
+            "{method}\n{uri}\n{query_string}\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
         );
         let canonical_hash = base64::hex(digest(&SHA256, canonical_request.as_bytes()).as_ref());
 
@@ -156,9 +259,15 @@ impl Route53 {
             self.access_key,
         );
 
+        let url = if query_string.is_empty() {
+            format!("{ENDPOINT}{uri}")
+        } else {
+            format!("{ENDPOINT}{uri}?{query_string}")
+        };
+
         match method {
             "GET" => http::get(
-                &format!("{ENDPOINT}{uri}"),
+                &url,
                 &[
                     ("Content-Type", content_type),
                     ("Host", "route53.amazonaws.com"),
@@ -168,7 +277,7 @@ impl Route53 {
                 ],
             ).map_err(|e| Error::Provider(format!("Route53 request: {e}"))),
             "POST" => http::post(
-                &format!("{ENDPOINT}{uri}"),
+                &url,
                 payload,
                 content_type,
                 &[
@@ -206,4 +315,23 @@ fn find_tag_start(xml: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
 
 fn find_tag_end(xml: &[u8], from: usize, tag: &[u8]) -> Option<usize> {
     find_tag_start(xml, from, tag).map(|i| i + tag.len())
+}
+
+fn extract_tag_value_str(xml: &[u8], start_tag: &[u8], end_tag: &[u8]) -> Option<String> {
+    let s = find_tag_start(xml, 0, start_tag)?;
+    let val_start = s + start_tag.len();
+    let e = find_tag_start(xml, val_start, end_tag)?;
+    std::str::from_utf8(&xml[val_start..e]).ok().map(|s| s.to_string())
+}
+
+fn contains_bytes(xml: &[u8], needle: &[u8]) -> bool {
+    if needle.len() > xml.len() {
+        return false;
+    }
+    for i in 0..=xml.len() - needle.len() {
+        if &xml[i..i + needle.len()] == needle {
+            return true;
+        }
+    }
+    false
 }
