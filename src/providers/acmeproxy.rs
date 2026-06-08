@@ -6,9 +6,9 @@ use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Acmeproxy {
-    url_base: String,
-    username: String,
-    password: String,
+    endpoint: String,
+    username: Option<String>,
+    password: Option<String>,
 }
 
 impl DnsProvider for Acmeproxy {
@@ -17,43 +17,66 @@ impl DnsProvider for Acmeproxy {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["ACMEPROXY_URL_BASE", "ACMEPROXY_USERNAME", "ACMEPROXY_PASSWORD"]
+        &["ACMEPROXY_ENDPOINT", "ACMEPROXY_USERNAME", "ACMEPROXY_PASSWORD"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let url_base = env.get("ACMEPROXY_URL_BASE")
-            .ok_or_else(|| Error::Config("ACMEPROXY_URL_BASE required".into()))?
+        let endpoint = env.get("ACMEPROXY_ENDPOINT")
+            .ok_or_else(|| Error::Config("ACMEPROXY_ENDPOINT required".into()))?
             .clone();
-        let username = env.get("ACMEPROXY_USERNAME")
-            .ok_or_else(|| Error::Config("ACMEPROXY_USERNAME required".into()))?
-            .clone();
-        let password = env.get("ACMEPROXY_PASSWORD")
-            .ok_or_else(|| Error::Config("ACMEPROXY_PASSWORD required".into()))?
-            .clone();
-        Ok(Box::new(Acmeproxy { url_base, username, password }))
+        let username = env.get("ACMEPROXY_USERNAME").cloned();
+        let password = env.get("ACMEPROXY_PASSWORD").cloned();
+        Ok(Box::new(Acmeproxy { endpoint, username, password }))
     }
 
-    fn add_txt(&self, _domain: &str, _name: &str, value: &str) -> ProviderResult {
-        let basic_auth = make_basic(&self.username, &self.password);
-        let url = format!("{}/update", self.url_base.trim_end_matches('/'));
+    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+        let fqdn = format!("{}.{}.", name, domain);
+        let url = format!("{}/present", self.endpoint.trim_end_matches('/'));
         let body = serde_json::json!({
-            "subdomain": "",
-            "txt": value,
+            "fqdn": fqdn,
+            "value": value,
         });
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &basic_auth)])
-            .map_err(|e| Error::Provider(format!("acmeproxy update: {e}")))?;
+        let headers = self.auth_headers();
+        let header_refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &header_refs)
+            .map_err(|e| Error::Provider(format!("acmeproxy present: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("acmeproxy update: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!("acmeproxy present: {} {}", resp.status, resp.body)));
         }
         Ok(())
     }
 
-    fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
+    fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+        let fqdn = format!("{}.{}.", name, domain);
+        let url = format!("{}/cleanup", self.endpoint.trim_end_matches('/'));
+        let body = serde_json::json!({
+            "fqdn": fqdn,
+            "value": value,
+        });
+        let headers = self.auth_headers();
+        let header_refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &header_refs)
+            .map_err(|e| Error::Provider(format!("acmeproxy cleanup: {e}")))?;
+        if resp.status >= 400 {
+            return Err(Error::Provider(format!("acmeproxy cleanup: {} {}", resp.status, resp.body)));
+        }
         Ok(())
     }
 }
 
-fn make_basic(username: &str, password: &str) -> String {
-    let creds = format!("{username}:{password}");
-    format!("Basic {}", base64::encode(creds.as_bytes()))
+impl Acmeproxy {
+    fn auth_headers(&self) -> Vec<(String, String)> {
+        let mut headers = vec![
+            ("Accept".to_string(), "application/json".to_string()),
+            ("Content-Type".to_string(), "application/json".to_string()),
+        ];
+        if let (Some(user), Some(pass)) = (&self.username, &self.password) {
+            if !user.is_empty() && !pass.is_empty() {
+                let creds = format!("{user}:{pass}");
+                let encoded = base64::encode_std(creds.as_bytes());
+                headers.insert(0, ("Authorization".to_string(), format!("Basic {encoded}")));
+            }
+        }
+        headers
+    }
 }
