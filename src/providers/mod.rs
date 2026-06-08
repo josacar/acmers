@@ -372,7 +372,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "ovh", name: "Ovh", env_vars: &["OVH_AK", "OVH_AS", "OVH_CK", "OVH_END_POINT"], create: |env| ovh::Ovh::new(env) },
     ProviderMeta { slug: "pdns", name: "Powerdns", env_vars: &["PDNS_Url", "PDNS_ServerId", "PDNS_Token", "PDNS_Ttl"], create: |env| pdns::Powerdns::new(env) },
     ProviderMeta { slug: "pdnsmanager", name: "Pdnsmanager", env_vars: &["PDNSMGR_API_KEY", "PDNSMGR_API_PASSWORD", "PDNSMGR_API_URL"], create: |env| pdnsmanager::Pdnsmanager::new(env) },
-    ProviderMeta { slug: "pleskxml", name: "Pleskxml", env_vars: &["PLESKXML_Username", "PLESKXML_Password", "PLESKXML_Host"], create: |env| pleskxml::Pleskxml::new(env) },
+    ProviderMeta { slug: "pleskxml", name: "Pleskxml", env_vars: &["pleskxml_user", "pleskxml_pass", "pleskxml_uri"], create: |env| pleskxml::Pleskxml::new(env) },
     ProviderMeta { slug: "pmiab", name: "Pmiab", env_vars: &["PMIAB_Username", "PMIAB_Password", "PMIAB_Server"], create: |env| pmiab::Pmiab::new(env) },
     ProviderMeta { slug: "pointhq", name: "Pointhq", env_vars: &["PointHQ_Key", "PointHQ_Email"], create: |env| pointhq::Pointhq::new(env) },
     ProviderMeta { slug: "porkbun", name: "Porkbun", env_vars: &["PORKBUN_API_KEY", "PORKBUN_SECRET_API_KEY"], create: |env| porkbun::Porkbun::new(env) },
