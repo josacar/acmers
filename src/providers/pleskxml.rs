@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
-use crate::base64;
 use crate::error::Error;
 use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Pleskxml {
-    host: String,
-    basic_auth: String,
+    user: String,
+    pass: String,
+    uri: String,
 }
 
 impl DnsProvider for Pleskxml {
@@ -16,22 +16,20 @@ impl DnsProvider for Pleskxml {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["PLESKXML_Username", "PLESKXML_Password", "PLESKXML_Host"]
+        &["pleskxml_user", "pleskxml_pass", "pleskxml_uri"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("PLESKXML_Username")
-            .ok_or_else(|| Error::Config("PLESKXML_Username required".into()))?
+        let user = env.get("pleskxml_user")
+            .ok_or_else(|| Error::Config("pleskxml_user required".into()))?
             .clone();
-        let password = env.get("PLESKXML_Password")
-            .ok_or_else(|| Error::Config("PLESKXML_Password required".into()))?
+        let pass = env.get("pleskxml_pass")
+            .ok_or_else(|| Error::Config("pleskxml_pass required".into()))?
             .clone();
-        let host = env.get("PLESKXML_Host")
-            .ok_or_else(|| Error::Config("PLESKXML_Host required".into()))?
+        let uri = env.get("pleskxml_uri")
+            .ok_or_else(|| Error::Config("pleskxml_uri required".into()))?
             .clone();
-        let creds = format!("{username}:{password}");
-        let basic_auth = format!("Basic {}", base64::encode_std(creds.as_bytes()));
-        Ok(Box::new(Pleskxml { host, basic_auth }))
+        Ok(Box::new(Pleskxml { user, pass, uri }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -47,8 +45,7 @@ impl DnsProvider for Pleskxml {
             Ok(id) => id,
             Err(_) => return Ok(()),
         };
-        let record_name = extract_record_name(name, domain);
-        let record_id = match self.find_record_id(&site_id, &record_name, value) {
+        let record_id = match self.find_record_id(&site_id, name, value) {
             Ok(Some(id)) => id,
             Ok(None) => return Ok(()),
             Err(_) => return Ok(()),
@@ -74,19 +71,40 @@ fn extract_record_name(name: &str, domain: &str) -> String {
 }
 
 impl Pleskxml {
-    fn api_url(&self) -> String {
-        format!("https://{}:8443/enterprise/control/agent.php", self.host)
-    }
-
     fn plesk_request(&self, xml_body: &str) -> Result<http::Response, Error> {
-        let url = self.api_url();
-        http::post(&url, xml_body.as_bytes(), "text/xml", &[
-            ("Authorization", &self.basic_auth),
+        http::post(&self.uri, xml_body.as_bytes(), "text/xml", &[
+            ("HTTP_AUTH_LOGIN", &self.user),
+            ("HTTP_AUTH_PASSWD", &self.pass),
+            ("HTTP_PRETTY_PRINT", "true"),
         ])
         .map_err(|e| Error::Provider(format!("pleskxml request: {e}")))
     }
 
     fn resolve_site(&self, domain: &str) -> Result<String, Error> {
+        let escaped = plesk_xml_escape(domain);
+        let xml = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<packet version="1.6.9.0">
+  <webspace>
+    <get>
+      <filter>
+        <name>{d}</name>
+      </filter>
+      <dataset>
+        <gen_info/>
+      </dataset>
+    </get>
+  </webspace>
+</packet>"#,
+            d = escaped
+        );
+        if let Ok(resp) = self.plesk_request(&xml) {
+            if resp.status < 400 {
+                if let Some(id) = plesk_find_int(&resp.body, "id") {
+                    return Ok(id);
+                }
+            }
+        }
         let xml = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <packet version="1.6.9.0">
@@ -96,12 +114,12 @@ impl Pleskxml {
         <name>{d}</name>
       </filter>
       <dataset>
-        <hosting/>
+        <gen_info/>
       </dataset>
     </get>
   </site>
 </packet>"#,
-            d = plesk_xml_escape(domain)
+            d = escaped
         );
         let resp = self.plesk_request(&xml)?;
         if resp.status >= 400 {
@@ -111,16 +129,16 @@ impl Pleskxml {
             .ok_or_else(|| Error::Provider(format!("pleskxml: site not found for {domain}")))
     }
 
-    fn find_record_id(&self, site_id: &str, record_name: &str, value: &str) -> Result<Option<String>, Error> {
+    fn find_record_id(&self, site_id: &str, fulldomain: &str, value: &str) -> Result<Option<String>, Error> {
         let xml = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <packet version="1.6.9.0">
   <dns>
-    <get_records>
+    <get_rec>
       <filter>
         <site-id>{sid}</site-id>
       </filter>
-    </get_records>
+    </get_rec>
   </dns>
 </packet>"#,
             sid = site_id
@@ -133,6 +151,7 @@ impl Pleskxml {
             return Ok(None);
         }
         let body = &resp.body;
+        let host_with_dot = format!("{}.", fulldomain);
         let mut pos = 0;
         while let Some(start) = body[pos..].find("<record>") {
             let rec_start = pos + start;
@@ -145,7 +164,7 @@ impl Pleskxml {
             let r_name = plesk_find_text(record, "host");
             let r_value = plesk_find_text(record, "value");
             if r_type.as_deref() == Some("TXT")
-                && r_name.as_deref() == Some(record_name)
+                && r_name.as_deref() == Some(&host_with_dot)
                 && r_value.as_deref() == Some(value)
             {
                 if let Some(id) = plesk_find_int(record, "id") {
@@ -162,15 +181,12 @@ impl Pleskxml {
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <packet version="1.6.9.0">
   <dns>
-    <add_records>
+    <add_rec>
       <site-id>{sid}</site-id>
-      <record>
-        <name>{rn}</name>
-        <type>TXT</type>
-        <opt/>
-        <value>{v}</value>
-      </record>
-    </add_records>
+      <type>TXT</type>
+      <host>{rn}</host>
+      <value>{v}</value>
+    </add_rec>
   </dns>
 </packet>"#,
             sid = site_id,
@@ -190,11 +206,11 @@ impl Pleskxml {
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <packet version="1.6.9.0">
   <dns>
-    <del_records>
+    <del_rec>
       <filter>
         <id>{rid}</id>
       </filter>
-    </del_records>
+    </del_rec>
   </dns>
 </packet>"#,
             rid = record_id
