@@ -322,7 +322,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "joker", name: "Joker", env_vars: &["JOKER_USERNAME", "JOKER_PASSWORD"], create: |env| joker::Joker::new(env) },
     ProviderMeta { slug: "kappernet", name: "Kappernet", env_vars: &["KAPPERNETDNS_Key", "KAPPERNETDNS_Secret"], create: |env| kappernet::Kappernet::new(env) },
     ProviderMeta { slug: "kas", name: "Kas", env_vars: &["KAS_Login", "KAS_Password"], create: |env| kas::Kas::new(env) },
-    ProviderMeta { slug: "kinghost", name: "Kinghost", env_vars: &["KINGHOST_ApiKey", "KINGHOST_Secret"], create: |env| kinghost::Kinghost::new(env) },
+    ProviderMeta { slug: "kinghost", name: "Kinghost", env_vars: &["KINGHOST_Username", "KINGHOST_Password"], create: |env| kinghost::Kinghost::new(env) },
     ProviderMeta { slug: "knot", name: "Knot", env_vars: &["KNOT_SERVER", "KNOT_KEY"], create: |env| knot::Knot::new(env) },
     ProviderMeta { slug: "la", name: "La", env_vars: &["LA_ApiKey", "LA_Secret"], create: |env| la::La::new(env) },
     ProviderMeta { slug: "leaseweb", name: "Leaseweb", env_vars: &["LEASEWEB_API_KEY"], create: |env| leaseweb::Leaseweb::new(env) },
