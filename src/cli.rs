@@ -8,6 +8,7 @@ pub enum Cmd {
         email: Option<String>,
         test: bool,
         standalone: bool,
+        dnssleep: u64,
         env_overrides: HashMap<String, String>,
     },
     Renew {
@@ -45,12 +46,13 @@ pub fn parse(args: &[String]) -> Result<Cmd, String> {
 }
 
 fn parse_issue(args: &[String]) -> Result<Cmd, String> {
-    let mut domains = Vec::new();
-    let mut provider = String::new();
-    let mut email = None;
-    let mut test = false;
-    let mut standalone = false;
-    let mut env_overrides = HashMap::new();
+        let mut domains = Vec::new();
+        let mut provider = String::new();
+        let mut email = None;
+        let mut test = false;
+        let mut standalone = false;
+        let mut dnssleep = 10u64;
+        let mut env_overrides = HashMap::new();
 
     let mut i = 0;
     while i < args.len() {
@@ -72,6 +74,11 @@ fn parse_issue(args: &[String]) -> Result<Cmd, String> {
             }
             "--test" | "--staging" => {
                 test = true;
+            }
+            "--dnssleep" => {
+                i += 1;
+                if i >= args.len() { return Err("missing seconds after --dnssleep".into()); }
+                dnssleep = args[i].parse().map_err(|_| format!("invalid dnssleep: {}", args[i]))?;
             }
             "--standalone" => {
                 standalone = true;
@@ -95,7 +102,7 @@ fn parse_issue(args: &[String]) -> Result<Cmd, String> {
         return Err("--dns provider required (or use --standalone)".into());
     }
 
-    Ok(Cmd::Issue { domains, provider, email, test, standalone, env_overrides })
+    Ok(Cmd::Issue { domains, provider, email, test, standalone, dnssleep, env_overrides })
 }
 
 fn parse_renew(args: &[String]) -> Result<Cmd, String> {

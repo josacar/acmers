@@ -28,8 +28,8 @@ fn main() {
 
 fn run(cmd: cli::Cmd) -> Result<(), Error> {
     match cmd {
-        cli::Cmd::Issue { domains, provider, email, test, standalone, env_overrides } => {
-            cmd_issue(&domains, &provider, email.as_deref(), test, standalone, &env_overrides)
+        cli::Cmd::Issue { domains, provider, email, test, standalone, dnssleep, env_overrides } => {
+            cmd_issue(&domains, &provider, email.as_deref(), test, standalone, dnssleep, &env_overrides)
         }
         cli::Cmd::Renew { domain, test } => cmd_renew(&domain, test),
         cli::Cmd::Revoke { domain } => cmd_revoke(&domain),
@@ -62,6 +62,7 @@ fn cmd_issue(
     email: Option<&str>,
     test: bool,
     standalone: bool,
+    dnssleep: u64,
     env_overrides: &HashMap<String, String>,
 ) -> Result<(), Error> {
     let mut config = config::Config::load()?;
@@ -150,6 +151,11 @@ fn cmd_issue(
             eprintln!("adding TXT record {challenge_domain} = {txt_value}");
             provider.add_txt(main_domain, &challenge_domain, &txt_value)?;
 
+            if dnssleep > 0 {
+                eprintln!("waiting {dnssleep}s for DNS propagation...");
+                std::thread::sleep(std::time::Duration::from_secs(dnssleep));
+            }
+
             eprintln!("signaling ACME server...");
             acme::challenge::respond_to_challenge(
                 &dns_challenge.url, &account.url, &account_key, &mut get_nonce,
@@ -212,7 +218,7 @@ fn cmd_renew(domain: &str, test: bool) -> Result<(), Error> {
         eprintln!("{domain}: {remaining} days until expiry");
     }
 
-    cmd_issue(&[domain.to_string()], &provider_slug, Some(&email), test, standalone, &HashMap::new())
+    cmd_issue(&[domain.to_string()], &provider_slug, Some(&email), test, standalone, 10, &HashMap::new())
 }
 
 fn cmd_revoke(domain: &str) -> Result<(), Error> {
