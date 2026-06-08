@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::thread;
+use std::time::Duration;
 use serde_json::Value;
 
 use crate::error::Error;
@@ -6,7 +8,7 @@ use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Ipv64 {
-    api_key: String,
+    token: String,
 }
 
 impl DnsProvider for Ipv64 {
@@ -15,56 +17,82 @@ impl DnsProvider for Ipv64 {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["IPV64_API_KEY"]
+        &["IPv64_Token"]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("IPV64_API_KEY")
-            .ok_or_else(|| Error::Config("IPV64_API_KEY required".into()))?.clone();
-        Ok(Box::new(Ipv64 { api_key }))
+        let token = env.get("IPv64_Token")
+            .ok_or_else(|| Error::Config("IPv64_Token required".into()))?.clone();
+        Ok(Box::new(Ipv64 { token }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let auth = format!("Bearer {}", self.api_key);
+        let (zone, sub) = self.resolve_zone(domain)?;
+        let zone = zone.to_lowercase();
+        let sub = sub.to_lowercase();
+        let auth = format!("Bearer {}", self.token);
         let headers: &[(&str, &str)] = &[("Authorization", &auth)];
-        let url = format!("https://ipv64.net/api?domain={}&add={}&type=TXT&content={}&ttl=120", domain, name, value);
-        let resp = http::post(&url, &[], "application/x-www-form-urlencoded", headers)
+        let body = format!("add_record={}&praefix={}&type=TXT&content={}", zone, sub, value);
+        let resp = http::post("https://ipv64.net/api", body.as_bytes(), "application/x-www-form-urlencoded", headers)
             .map_err(|e| Error::Provider(format!("ipv64 add TXT: {e}")))?;
-        if resp.status >= 400 {
-            return Err(Error::Provider(format!("ipv64 add TXT: HTTP {} {}", resp.status, resp.body)));
+        let resp = if resp.body.contains("429 Too Many Requests") {
+            thread::sleep(Duration::from_secs(10));
+            http::post("https://ipv64.net/api", body.as_bytes(), "application/x-www-form-urlencoded", headers)
+                .map_err(|e| Error::Provider(format!("ipv64 add TXT: {e}")))?
+        } else {
+            resp
+        };
+        if !resp.body.contains("\"info\":\"success\"") {
+            return Err(Error::Provider(format!("ipv64 add TXT: {}", resp.body)));
         }
         Ok(())
     }
 
     fn remove_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
-        let auth = format!("Bearer {}", self.api_key);
-        let headers: &[(&str, &str)] = &[("Authorization", &auth)];
-        let url = format!("https://ipv64.net/api?domain={}", domain);
-        let resp = match http::get(&url, headers) {
-            Ok(r) => r,
-            Err(_) => return Ok(()),
-        };
-        if resp.status >= 400 {
-            return Ok(());
-        }
-        let v: Value = match serde_json::from_str(&resp.body) {
+        let (zone, sub) = match self.resolve_zone(domain) {
             Ok(v) => v,
-            Err(_) => return Ok(()),
+            Err(e) => { eprintln!("warning: cleanup failed: {e}"); return Ok(()); }
         };
-        if let Some(records) = v.get("records").and_then(|r| r.as_array()) {
-            for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
-                    && record.get("name").and_then(|n| n.as_str()) == Some(name)
-                    && record.get("content").and_then(|c| c.as_str()) == Some(value)
-                {
-                    if let Some(id) = record.get("id").and_then(|i| i.as_i64()) {
-                        let del_url = format!("https://ipv64.net/api?domain={}&del={}", domain, id);
-                        let _ = http::post(&del_url, &[], "application/x-www-form-urlencoded", headers);
-                    }
-                    return Ok(());
-                }
-            }
+        let zone = zone.to_lowercase();
+        let sub = sub.to_lowercase();
+        let auth = format!("Bearer {}", self.token);
+        let headers: &[(&str, &str)] = &[("Authorization", &auth)];
+        let body = format!("del_record={}&praefix={}&type=TXT&content={}", zone, sub, value);
+        let resp = match http::delete_with_body("https://ipv64.net/api", body.as_bytes(), "application/x-www-form-urlencoded", headers) {
+            Ok(r) => r,
+            Err(e) => { eprintln!("warning: cleanup failed: {e}"); return Ok(()); }
+        };
+        if resp.body.contains("429 Too Many Requests") {
+            thread::sleep(Duration::from_secs(10));
+            let _ = http::delete_with_body("https://ipv64.net/api", body.as_bytes(), "application/x-www-form-urlencoded", headers);
         }
         Ok(())
+    }
+}
+
+impl Ipv64 {
+    fn resolve_zone(&self, fulldomain: &str) -> Result<(String, String), Error> {
+        let auth = format!("Bearer {}", self.token);
+        let headers: &[(&str, &str)] = &[("Authorization", &auth)];
+        let resp = http::get("https://ipv64.net/api?get_domains", headers)
+            .map_err(|e| Error::Provider(format!("ipv64 get_domains: {e}")))?;
+        let mut body = resp.body;
+        if body.contains("429 Too Many Requests") {
+            thread::sleep(Duration::from_secs(10));
+            let resp = http::get("https://ipv64.net/api?get_domains", headers)
+                .map_err(|e| Error::Provider(format!("ipv64 get_domains: {e}")))?;
+            body = resp.body;
+        }
+        let v: Value = serde_json::from_str(&body)
+            .map_err(|e| Error::Provider(format!("ipv64 get_domains parse: {e}")))?;
+        let parts: Vec<&str> = fulldomain.split('.').collect();
+        for i in 0..parts.len() {
+            let candidate = parts[i..].join(".");
+            if v.get(&candidate).is_some() {
+                let sub = parts[..i].join(".");
+                return Ok((candidate, sub));
+            }
+        }
+        Err(Error::Provider(format!("ipv64: no zone found for {}", fulldomain)))
     }
 }
