@@ -10,7 +10,6 @@ use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
 const JD_PROD: &str = "clouddnsservice";
-const JD_API: &str = "jdcloud-api.com";
 const JD_HOST: &str = "clouddnsservice.jdcloud-api.com";
 const JD_API_VERSION: &str = "v1";
 const JD_DEFAULT_REGION: &str = "cn-north-1";
@@ -43,7 +42,7 @@ impl DnsProvider for Jd {
         Ok(Box::new(Jd { access_key_id, access_key_secret, region }))
     }
 
-    fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
+    fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
         let (domain_id, sub_domain) = self.get_root(name)?;
         let body = serde_json::json!({
             "req": {
