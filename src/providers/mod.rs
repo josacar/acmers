@@ -332,7 +332,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "linode_v4", name: "Linodev4", env_vars: &["LINODE_V4_API_KEY"], create: |env| linode_v4::Linodev4::new(env) },
     ProviderMeta { slug: "loopia", name: "Loopia", env_vars: &["LOOPIA_User", "LOOPIA_Password"], create: |env| loopia::Loopia::new(env) },
     ProviderMeta { slug: "lua", name: "Luadns", env_vars: &["LUA_Key", "LUA_Email"], create: |env| lua::Luadns::new(env) },
-    ProviderMeta { slug: "maradns", name: "Maradns", env_vars: &["MARADNS_URL"], create: |env| maradns::Maradns::new(env) },
+    ProviderMeta { slug: "maradns", name: "Maradns", env_vars: &["MARA_ZONE_FILE", "MARA_DUENDE_PID_PATH"], create: |env| maradns::Maradns::new(env) },
     ProviderMeta { slug: "me", name: "Dnsmadeeasy", env_vars: &["ME_Key", "ME_Secret"], create: |env| me::Dnsmadeeasy::new(env) },
     ProviderMeta { slug: "mgwm", name: "Mgwm", env_vars: &["MGWM_CUSTOMER", "MGWM_API_HASH"], create: |env| mgwm::Mgwm::new(env) },
     ProviderMeta { slug: "miab", name: "Miab", env_vars: &["MIAB_Username", "MIAB_Password", "MIAB_Server"], create: |env| miab::Miab::new(env) },
