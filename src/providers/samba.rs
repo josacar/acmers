@@ -15,14 +15,16 @@ impl DnsProvider for Samba {
     }
 
     fn new(_env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        Ok(Box::new(Samba))
+        Err(Error::Provider(
+            "samba provider requires samba-tool CLI and cannot be implemented in pure Rust".into(),
+        ))
     }
 
     fn add_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Err(Error::Provider("Samba AD DC uses LDAP+Kerberos. Not yet implemented.".into()))
+        Err(Error::Provider("samba provider requires samba-tool CLI".into()))
     }
 
     fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Ok(())
+        Err(Error::Provider("samba provider requires samba-tool CLI".into()))
     }
 }
