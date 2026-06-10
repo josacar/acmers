@@ -24,9 +24,44 @@ impl MockServer {
             loop {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        let mut buf = [0u8; 16384];
-                        if let Ok(n) = stream.read(&mut buf) {
-                            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                        stream.set_nonblocking(false).unwrap();
+                        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+                        let mut buf = Vec::new();
+                        let mut tmp = [0u8; 4096];
+                        let mut header_done = false;
+                        let mut content_length: usize = 0;
+                        loop {
+                            match stream.read(&mut tmp) {
+                                Ok(0) => break,
+                                Ok(n) => {
+                                    buf.extend_from_slice(&tmp[..n]);
+                                    if !header_done {
+                                        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                                            header_done = true;
+                                            let header_str = String::from_utf8_lossy(&buf[..pos]).to_lowercase();
+                                            content_length = header_str.lines()
+                                                .find(|l| l.starts_with("content-length:"))
+                                                .and_then(|l| l.split(':').nth(1))
+                                                .and_then(|v| v.trim().parse().ok())
+                                                .unwrap_or(0);
+                                            let body_start = pos + 4;
+                                            if buf.len() - body_start >= content_length {
+                                                break;
+                                            }
+                                        }
+                                    } else {
+                                        let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+                                        if buf.len() - header_end >= content_length {
+                                            break;
+                                        }
+                                    }
+                                }
+                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                                Err(_) => break,
+                            }
+                        }
+                        if !buf.is_empty() {
+                            let req = String::from_utf8_lossy(&buf).to_string();
                             let (method, path, body, headers) = parse_request(&req);
                             let result = catch_unwind(std::panic::AssertUnwindSafe(|| {
                                 handler(&method, &path, &body, &headers)

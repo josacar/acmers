@@ -211,3 +211,101 @@ fn test_porkbun_add_txt() {
     let result = provider.add_txt("example.com", "_acme-challenge", "test-value");
     assert!(result.is_ok(), "Porkbun add_txt failed: {:?}", result.err());
 }
+
+#[test]
+fn test_kas_add_txt() {
+    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, body, _headers| {
+        if method == "GET" && path.contains("KasApi.wsdl") {
+            let wsdl = r#"<?xml version="1.0"?><definitions xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"><service name="KasApiService"><port name="KasApiPort"><soap:address location="https://kasapi.kasserver.com/soap/v1/KasApi.php"/></port></service></definitions>"#;
+            return (200, wsdl.to_string(), HashMap::new());
+        }
+        if method == "GET" && path.contains("KasAuth.wsdl") {
+            let wsdl = r#"<?xml version="1.0"?><definitions xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"><service name="KasAuthService"><port name="KasAuthPort"><soap:address location="https://kasapi.kasserver.com/soap/v1/KasAuth.php"/></port></service></definitions>"#;
+            return (200, wsdl.to_string(), HashMap::new());
+        }
+        if method == "POST" && path.contains("KasAuth.php") {
+            let resp = r#"<?xml version="1.0"?><SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"><SOAP-ENV:Body><ns1:KasAuthResponse xmlns:ns1="urn:xmethodsKasApiAuthentication"><return xsi:type="xsd:string">test-credential-token-12345</return></ns1:KasAuthResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>"#;
+            return (200, resp.to_string(), HashMap::new());
+        }
+        if method == "POST" && path.contains("KasApi.php") {
+            let body_str = String::from_utf8_lossy(body);
+            if body_str.contains(r#""kas_action":"get_domains""#) {
+                let resp = r#"<?xml version="1.0"?><SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"><SOAP-ENV:Body><ns1:KasApiResponse xmlns:ns1="urn:xmethodsKasApi"><return xsi:type="xsd:string"><item><key xsi:type="xsd:string">domain_name</key><value xsi:type="xsd:string">example.com</value></item></return></ns1:KasApiResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>"#;
+                return (200, resp.to_string(), HashMap::new());
+            }
+            if body_str.contains(r#""kas_action":"get_dns_settings""#) {
+                let resp = r#"<?xml version="1.0"?><SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"><SOAP-ENV:Body><ns1:KasApiResponse xmlns:ns1="urn:xmethodsKasApi"><return xsi:type="xsd:string"></return></ns1:KasApiResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>"#;
+                return (200, resp.to_string(), HashMap::new());
+            }
+            if body_str.contains(r#""kas_action":"add_dns_settings""#) {
+                let resp = r#"<?xml version="1.0"?><SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"><SOAP-ENV:Body><ns1:KasApiResponse xmlns:ns1="urn:xmethodsKasApi"><return xsi:type="xsd:string"><item><key xsi:type="xsd:string">ReturnString</key><value xsi:type="xsd:string">TRUE</value></item></return></ns1:KasApiResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>"#;
+                return (200, resp.to_string(), HashMap::new());
+            }
+            if body_str.contains(r#""kas_action":"delete_dns_settings""#) {
+                let resp = r#"<?xml version="1.0"?><SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"><SOAP-ENV:Body><ns1:KasApiResponse xmlns:ns1="urn:xmethodsKasApi"><return xsi:type="xsd:string"><item><key xsi:type="xsd:string">ReturnString</key><value xsi:type="xsd:string">TRUE</value></item></return></ns1:KasApiResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>"#;
+                return (200, resp.to_string(), HashMap::new());
+            }
+        }
+        (404, "{}".to_string(), HashMap::new())
+    });
+
+    let server = MockServer::new(handler);
+    acmers::http::set_test_base(&server.url());
+
+    let mut env = HashMap::new();
+    env.insert("KAS_Login".to_string(), "test-login".to_string());
+    env.insert("KAS_Authtype".to_string(), "plain".to_string());
+    env.insert("KAS_Authdata".to_string(), "test-password".to_string());
+    let kas = acmers::providers::find("kas").unwrap();
+    let provider = (kas.create)(&env).unwrap();
+
+    let result = provider.add_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    assert!(result.is_ok(), "KAS add_txt failed: {:?}", result.err());
+}
+
+#[test]
+fn test_kas_remove_txt() {
+    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, body, _headers| {
+        if method == "GET" && path.contains("KasApi.wsdl") {
+            let wsdl = r#"<?xml version="1.0"?><definitions xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"><service name="KasApiService"><port name="KasApiPort"><soap:address location="https://kasapi.kasserver.com/soap/v1/KasApi.php"/></port></service></definitions>"#;
+            return (200, wsdl.to_string(), HashMap::new());
+        }
+        if method == "GET" && path.contains("KasAuth.wsdl") {
+            let wsdl = r#"<?xml version="1.0"?><definitions xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"><service name="KasAuthService"><port name="KasAuthPort"><soap:address location="https://kasapi.kasserver.com/soap/v1/KasAuth.php"/></port></service></definitions>"#;
+            return (200, wsdl.to_string(), HashMap::new());
+        }
+        if method == "POST" && path.contains("KasAuth.php") {
+            let resp = r#"<?xml version="1.0"?><SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"><SOAP-ENV:Body><ns1:KasAuthResponse xmlns:ns1="urn:xmethodsKasApiAuthentication"><return xsi:type="xsd:string">test-credential-token-12345</return></ns1:KasAuthResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>"#;
+            return (200, resp.to_string(), HashMap::new());
+        }
+        if method == "POST" && path.contains("KasApi.php") {
+            let body_str = String::from_utf8_lossy(body);
+            if body_str.contains(r#""kas_action":"get_domains""#) {
+                let resp = r#"<?xml version="1.0"?><SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"><SOAP-ENV:Body><ns1:KasApiResponse xmlns:ns1="urn:xmethodsKasApi"><return xsi:type="xsd:string"><item><key xsi:type="xsd:string">domain_name</key><value xsi:type="xsd:string">example.com</value></item></return></ns1:KasApiResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>"#;
+                return (200, resp.to_string(), HashMap::new());
+            }
+            if body_str.contains(r#""kas_action":"get_dns_settings""#) {
+                let resp = r#"<?xml version="1.0"?><SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"><SOAP-ENV:Body><ns1:KasApiResponse xmlns:ns1="urn:xmethodsKasApi"><return xsi:type="xsd:string"><item xsi:type="ns2:Map"><item><key xsi:type="xsd:string">record_id</key><value xsi:type="xsd:string">99999</value></item><item><key xsi:type="xsd:string">record_name</key><value xsi:type="xsd:string">_acme-challenge</value></item><item><key xsi:type="xsd:string">record_type</key><value xsi:type="xsd:string">TXT</value></item><item><key xsi:type="xsd:string">record_data</key><value xsi:type="xsd:string">test-challenge-value</value></item></item></return></ns1:KasApiResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>"#;
+                return (200, resp.to_string(), HashMap::new());
+            }
+            if body_str.contains(r#""kas_action":"delete_dns_settings""#) {
+                let resp = r#"<?xml version="1.0"?><SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"><SOAP-ENV:Body><ns1:KasApiResponse xmlns:ns1="urn:xmethodsKasApi"><return xsi:type="xsd:string"><item><key xsi:type="xsd:string">ReturnString</key><value xsi:type="xsd:string">TRUE</value></item></return></ns1:KasApiResponse></SOAP-ENV:Body></SOAP-ENV:Envelope>"#;
+                return (200, resp.to_string(), HashMap::new());
+            }
+        }
+        (404, "{}".to_string(), HashMap::new())
+    });
+
+    let server = MockServer::new(handler);
+    acmers::http::set_test_base(&server.url());
+
+    let mut env = HashMap::new();
+    env.insert("KAS_Login".to_string(), "test-login".to_string());
+    env.insert("KAS_Authtype".to_string(), "plain".to_string());
+    env.insert("KAS_Authdata".to_string(), "test-password".to_string());
+    let kas = acmers::providers::find("kas").unwrap();
+    let provider = (kas.create)(&env).unwrap();
+
+    let result = provider.remove_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    assert!(result.is_ok(), "KAS remove_txt failed: {:?}", result.err());
+}
