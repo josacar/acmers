@@ -386,7 +386,7 @@ pub static PROVIDERS: &[ProviderMeta] = &[
     ProviderMeta { slug: "restena", name: "Restena", env_vars: &["RESTENA_Username", "RESTENA_Password"], create: |env| restena::Restena::new(env) },
     ProviderMeta { slug: "samba", name: "Samba", env_vars: &["SAMBA_HOSTNAME", "SAMBA_DOMAIN", "SAMBA_USERNAME", "SAMBA_PASSWORD"], create: |env| samba::Samba::new(env) },
     ProviderMeta { slug: "scaleway", name: "Scaleway", env_vars: &["SCALEWAY_API_TOKEN", "SCALEWAY_PROJECT_ID"], create: |env| scaleway::Scaleway::new(env) },
-    ProviderMeta { slug: "schlundtech", name: "Schlundtech", env_vars: &["SCHLUNDTECH_Username", "SCHLUNDTECH_Password"], create: |env| schlundtech::Schlundtech::new(env) },
+    ProviderMeta { slug: "schlundtech", name: "Schlundtech", env_vars: &["SCHLUNDTECH_USER", "SCHLUNDTECH_PASSWORD"], create: |env| schlundtech::Schlundtech::new(env) },
     ProviderMeta { slug: "sdns", name: "Sdns", env_vars: &["SDNS_Username", "SDNS_Password"], create: |env| sdns::Sdns::new(env) },
     ProviderMeta { slug: "selectel", name: "Selectel", env_vars: &["SL_Ver", "SL_Key", "SL_Login_ID", "SL_Project_Name", "SL_Login_Name", "SL_Pswd", "SL_Expire"], create: |env| selectel::Selectel::new(env) },
     ProviderMeta { slug: "selfhost", name: "Selfhost", env_vars: &["SELFHOSTDNS_USERNAME", "SELFHOSTDNS_PASSWORD", "SELFHOSTDNS_MAP"], create: |env| selfhost::Selfhost::new(env) },
