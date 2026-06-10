@@ -309,3 +309,72 @@ fn test_kas_remove_txt() {
     let result = provider.remove_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
     assert!(result.is_ok(), "KAS remove_txt failed: {:?}", result.err());
 }
+
+#[test]
+fn test_oci_add_txt() {
+    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, headers| {
+        if method == "GET" && path == "/20180115/zones/example.com" {
+            return (200, serde_json::json!({
+                "id": "ocid1.dns-zone.oc1..test",
+                "name": "example.com",
+                "zoneType": "PRIMARY"
+            }).to_string(), HashMap::new());
+        }
+        if method == "PATCH" && path == "/20180115/zones/example.com/records" {
+            assert!(headers.contains_key("authorization"), "missing Authorization header");
+            let auth = headers.get("authorization").unwrap();
+            assert!(auth.starts_with("Signature "), "bad auth scheme");
+            assert!(auth.contains("keyId=\"ocid1.tenancy.oc1..test/ocid1.user.oc1..test/"), "bad keyId");
+            return (200, "[]".to_string(), HashMap::new());
+        }
+        (404, "{}".to_string(), HashMap::new())
+    });
+
+    let server = MockServer::new(handler);
+    acmers::http::set_test_base(&server.url());
+
+    let test_key = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDxRGYu/L00KteB\n1Ls7aT0zwSYdTS3k4OBWUkkN7FMfi8vVHCu4UCOX8dJQd08WRsGrnE+Dcu5c61rA\nYDImhIk5YjeIFNPY0HemhwStA/z1GpHKoCQzmkkn8NWmfhNoCozc1ja6MVm4eIL1\nzWuKia2+DkmXyW8rn1p+nSjrlu2D/BDe/wMjXYvP+ZBC2E4qMdJs41ue/mHWDe1E\n4jKRDjKmt+azceeCpnskpmAB49K2xuTznJB2t25iXfoEhNCO1jU0Y94fBHOgSdaG\nMuI6VsWjBKWcpLeUAOQO8YC8wgSbeIt9AiPruydR+YQPmy8w7H/SgdFQoFkH3qWV\n2rqWaVMZAgMBAAECggEAAslc5/9AIqKICfdLUvRwLn2mxOIggyb4+7KjJncU+ON/\nAZxfAaxiw5DsD0kmpU4G8Fr1qMoSGeCTj/tAD75HTDy6VG857A/DTFb9ZUFFJmD8\nusu2QWSEDetdPWKO0AxlFPGPqkFhysXffRbX3400PlpCBXgZ91jKPuEXa6zHU8Ks\nizk83yxc4wp7CmkX2VbRf4UAf2gQaPL5w83J5A45L87deRWK//IijQwotS4svR77\nZIQxCjlnFc9udkIP0JvihfIv8tcY1L/HdRscV7sximwKmKbH0mvXwgNYA5Corau8\noRsi/TB1vOSJYOqlnUhmx4xbmZGAmmFoO+dWTnnpvQKBgQD4mJkFU9wNJeKJ3Tzd\n6EKtHJDhaTuQMvqk9OXH3U7G5F+cQ+U5RQ1ZbJkMS5Z1T1wP28egtNZVnvujKFkD\n77nBYY4XpOLhGpXx83YxsRrEZSCuNPtgNJrGDFQwYoDCWtgNGYAdIw8cHeIXJ5Y9\n91pCm164Qb8vaDv4J/ry6h1IuwKBgQD4c+w6FyMVD+sYmUC7v9v3eeqAI0OmbfHd\nNWAHaNtEq1ywyZVQjlF+P9B3nyiSSEFHDXokWBbgO45d4cPpp6r3ioCa2aGwYUwi\nuNEUxlsHHww9TJj64w1yXAe1a224sAHUBNLvRZ+nKSd9vV0v6jfqxo4uwtBpmx2F\nokycdOuwOwKBgC5vwtW97nL+SqzaCM6i3iGcHmwcziWHgE5j+LA25Mo+SqXUAPOL\ntIypvoUPcZGEO3wy371jSk5AHl1B4i7cDuTSpkpAYKkP4EaL5d4uaQOaqFoiR3qX\nGPo5v1gybj7f3U/FHatTqzTjWCJfIK9+jvu2LiFZFq9yVxFp1nSdys6VAoGAJfHG\nXSTVdc0Fka8uJL5rgMM83i8EkPFvo+IX9Wm9OyKUuGdBB5mEtqxWUT6ceqLQXWKg\nidZuP/a4inwFaLTztnSPqZadTAvADfl97RdSJadHPkFph7+PeSy2/K0Yh8FRtii6\nclKGzIfLgTefeMbjnVaPtnKIU+idvKAJ5UcyC6sCgYEA6tQSW/2c1rOBuwdSYvyd\nbSm5dyf+srGvyIsAOS9shBVOwQcYa5UoFO5EgD6I066wvGtwhWJWGROLwZy6qvBb\n1cPYOj3pFrtkCpl5tgfI7YDztXZhKE3KOQCRSLrgQ/a6EM2vA8KwIqXLqqsHUPJJ\nZ5fZtc/KoTqLNc6P1I3/2fA=\n-----END PRIVATE KEY-----";
+
+    let mut env = HashMap::new();
+    env.insert("OCI_PRIVKEY".to_string(), test_key.to_string());
+    env.insert("OCI_TENANCY".to_string(), "ocid1.tenancy.oc1..test".to_string());
+    env.insert("OCI_USER".to_string(), "ocid1.user.oc1..test".to_string());
+    env.insert("OCI_REGION".to_string(), "us-phoenix-1".to_string());
+    let oci = acmers::providers::find("oci").unwrap();
+    let provider = (oci.create)(&env).unwrap();
+
+    let result = provider.add_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    assert!(result.is_ok(), "OCI add_txt failed: {:?}", result.err());
+}
+
+#[test]
+fn test_oci_remove_txt() {
+    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, _headers| {
+        if method == "GET" && path == "/20180115/zones/example.com" {
+            return (200, serde_json::json!({
+                "id": "ocid1.dns-zone.oc1..test",
+                "name": "example.com"
+            }).to_string(), HashMap::new());
+        }
+        if method == "PATCH" && path == "/20180115/zones/example.com/records" {
+            return (200, "[]".to_string(), HashMap::new());
+        }
+        (404, "{}".to_string(), HashMap::new())
+    });
+
+    let server = MockServer::new(handler);
+    acmers::http::set_test_base(&server.url());
+
+    let test_key = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDxRGYu/L00KteB\n1Ls7aT0zwSYdTS3k4OBWUkkN7FMfi8vVHCu4UCOX8dJQd08WRsGrnE+Dcu5c61rA\nYDImhIk5YjeIFNPY0HemhwStA/z1GpHKoCQzmkkn8NWmfhNoCozc1ja6MVm4eIL1\nzWuKia2+DkmXyW8rn1p+nSjrlu2D/BDe/wMjXYvP+ZBC2E4qMdJs41ue/mHWDe1E\n4jKRDjKmt+azceeCpnskpmAB49K2xuTznJB2t25iXfoEhNCO1jU0Y94fBHOgSdaG\nMuI6VsWjBKWcpLeUAOQO8YC8wgSbeIt9AiPruydR+YQPmy8w7H/SgdFQoFkH3qWV\n2rqWaVMZAgMBAAECggEAAslc5/9AIqKICfdLUvRwLn2mxOIggyb4+7KjJncU+ON/\nAZxfAaxiw5DsD0kmpU4G8Fr1qMoSGeCTj/tAD75HTDy6VG857A/DTFb9ZUFFJmD8\nusu2QWSEDetdPWKO0AxlFPGPqkFhysXffRbX3400PlpCBXgZ91jKPuEXa6zHU8Ks\nizk83yxc4wp7CmkX2VbRf4UAf2gQaPL5w83J5A45L87deRWK//IijQwotS4svR77\nZIQxCjlnFc9udkIP0JvihfIv8tcY1L/HdRscV7sximwKmKbH0mvXwgNYA5Corau8\noRsi/TB1vOSJYOqlnUhmx4xbmZGAmmFoO+dWTnnpvQKBgQD4mJkFU9wNJeKJ3Tzd\n6EKtHJDhaTuQMvqk9OXH3U7G5F+cQ+U5RQ1ZbJkMS5Z1T1wP28egtNZVnvujKFkD\n77nBYY4XpOLhGpXx83YxsRrEZSCuNPtgNJrGDFQwYoDCWtgNGYAdIw8cHeIXJ5Y9\n91pCm164Qb8vaDv4J/ry6h1IuwKBgQD4c+w6FyMVD+sYmUC7v9v3eeqAI0OmbfHd\nNWAHaNtEq1ywyZVQjlF+P9B3nyiSSEFHDXokWBbgO45d4cPpp6r3ioCa2aGwYUwi\nuNEUxlsHHww9TJj64w1yXAe1a224sAHUBNLvRZ+nKSd9vV0v6jfqxo4uwtBpmx2F\nokycdOuwOwKBgC5vwtW97nL+SqzaCM6i3iGcHmwcziWHgE5j+LA25Mo+SqXUAPOL\ntIypvoUPcZGEO3wy371jSk5AHl1B4i7cDuTSpkpAYKkP4EaL5d4uaQOaqFoiR3qX\nGPo5v1gybj7f3U/FHatTqzTjWCJfIK9+jvu2LiFZFq9yVxFp1nSdys6VAoGAJfHG\nXSTVdc0Fka8uJL5rgMM83i8EkPFvo+IX9Wm9OyKUuGdBB5mEtqxWUT6ceqLQXWKg\nidZuP/a4inwFaLTztnSPqZadTAvADfl97RdSJadHPkFph7+PeSy2/K0Yh8FRtii6\nclKGzIfLgTefeMbjnVaPtnKIU+idvKAJ5UcyC6sCgYEA6tQSW/2c1rOBuwdSYvyd\nbSm5dyf+srGvyIsAOS9shBVOwQcYa5UoFO5EgD6I066wvGtwhWJWGROLwZy6qvBb\n1cPYOj3pFrtkCpl5tgfI7YDztXZhKE3KOQCRSLrgQ/a6EM2vA8KwIqXLqqsHUPJJ\nZ5fZtc/KoTqLNc6P1I3/2fA=\n-----END PRIVATE KEY-----";
+
+    let mut env = HashMap::new();
+    env.insert("OCI_PRIVKEY".to_string(), test_key.to_string());
+    env.insert("OCI_TENANCY".to_string(), "ocid1.tenancy.oc1..test".to_string());
+    env.insert("OCI_USER".to_string(), "ocid1.user.oc1..test".to_string());
+    env.insert("OCI_REGION".to_string(), "us-phoenix-1".to_string());
+    let oci = acmers::providers::find("oci").unwrap();
+    let provider = (oci.create)(&env).unwrap();
+
+    let result = provider.remove_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    assert!(result.is_ok(), "OCI remove_txt failed: {:?}", result.err());
+}
