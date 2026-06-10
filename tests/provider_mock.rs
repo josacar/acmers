@@ -378,3 +378,53 @@ fn test_oci_remove_txt() {
     let result = provider.remove_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
     assert!(result.is_ok(), "OCI remove_txt failed: {:?}", result.err());
 }
+
+#[test]
+fn test_joker_add_txt() {
+    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, body, _headers| {
+        if method == "POST" && path.contains("/nic/replace") {
+            let body_str = String::from_utf8_lossy(body);
+            if body_str.contains("label=jokerTXTUpdateTest") {
+                return (200, "OK: 0|1|...".to_string(), HashMap::new());
+            }
+            if body_str.contains("type=TXT") && body_str.contains("value=test-challenge-value") {
+                return (200, "OK: 0|1|...".to_string(), HashMap::new());
+            }
+        }
+        (404, "not found".to_string(), HashMap::new())
+    });
+
+    let server = MockServer::new(handler);
+    acmers::http::set_test_base(&server.url());
+
+    let mut env = HashMap::new();
+    env.insert("JOKER_USERNAME".to_string(), "test-user".to_string());
+    env.insert("JOKER_PASSWORD".to_string(), "test-pass".to_string());
+    let joker = acmers::providers::find("joker").unwrap();
+    let provider = (joker.create)(&env).unwrap();
+
+    let result = provider.add_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    assert!(result.is_ok(), "Joker add_txt failed: {:?}", result.err());
+}
+
+#[test]
+fn test_joker_remove_txt() {
+    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, _headers| {
+        if method == "POST" && path.contains("/nic/replace") {
+            return (200, "OK: 0|1|...".to_string(), HashMap::new());
+        }
+        (404, "not found".to_string(), HashMap::new())
+    });
+
+    let server = MockServer::new(handler);
+    acmers::http::set_test_base(&server.url());
+
+    let mut env = HashMap::new();
+    env.insert("JOKER_USERNAME".to_string(), "test-user".to_string());
+    env.insert("JOKER_PASSWORD".to_string(), "test-pass".to_string());
+    let joker = acmers::providers::find("joker").unwrap();
+    let provider = (joker.create)(&env).unwrap();
+
+    let result = provider.remove_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    assert!(result.is_ok(), "Joker remove_txt failed: {:?}", result.err());
+}
