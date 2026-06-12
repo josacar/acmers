@@ -22,10 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo build --release
-      - name: Package as .deb
-        run: ./scripts/build-deb.sh --binary target/release/acmers --arch ${{ matrix.arch }} --output-dir dist
+      - name: Build and package .deb
+        run: dpkg-buildpackage -d -b -us -uc
       - uses: actions/upload-artifact@v7
         with:
           name: acmers-${{ matrix.arch }}
-          path: dist/*.deb
+          path: ../acmers_*.deb
