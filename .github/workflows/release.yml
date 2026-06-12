@@ -5,34 +5,24 @@ on:
       - 'v*'
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        target:
-          - x86_64-unknown-linux-gnu
-          - aarch64-unknown-linux-gnu
+        include:
+          - runner: ubuntu-latest
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - name: Install cross-compilation dependencies
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-      - name: Build release binary
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-        run: cargo build --release --target ${{ matrix.target }}
+      - run: cargo build --release
       - name: Package as .deb
-        run: |
-          ARCH="${{ matrix.target == 'x86_64-unknown-linux-gnu' && 'amd64' || 'arm64' }}"
-          ./scripts/build-deb.sh --binary target/${{ matrix.target }}/release/acmers --arch "$ARCH" --output-dir ./dist
+        run: ./scripts/build-deb.sh --binary target/release/acmers --arch ${{ matrix.arch }} --output-dir dist
       - uses: actions/upload-artifact@v7
         with:
-          name: acmers-${{ matrix.target }}
+          name: acmers-${{ matrix.arch }}
           path: dist/*.deb
 
   release:
