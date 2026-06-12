@@ -14,7 +14,7 @@ dependencies** — no system tools needed. Single binary, no runtime, no surpris
 ```sh
 # Debian/Ubuntu (.deb package)
 # Download from GitHub Releases: https://github.com/josacar/acmers/releases
-sudo dpkg -i acmers_0.1.0_amd64.deb
+sudo dpkg -i acmers_0.2.0_amd64.deb
 
 # Or from crates.io
 cargo install acmers
@@ -269,6 +269,43 @@ cargo test
 # Run integration tests against Let's Encrypt staging
 cargo test --test integration -- --test-threads=1
 ```
+
+## Development
+
+This project uses [mise](https://mise.jdx.dev/) for task management. All common operations
+are available as mise tasks:
+
+```sh
+# Build and development
+mise run build              # Build the project
+mise run test               # Run all tests
+mise run lint               # Run clippy linter
+mise run format             # Format code with rustfmt
+mise run check              # Run format-check, lint, and test
+
+# Provider analysis
+mise run providers          # Count implemented vs stub providers
+
+# Packaging
+mise run debian-build       # Build .deb package locally
+mise run size               # Show binary size
+mise run install            # Install to ~/.cargo/bin
+
+# GitHub operations
+mise run github-status      # Check GitHub Actions status
+mise run github-workflows   # List available workflows
+mise run github-releases    # List all releases
+mise run github-release     # View latest release
+
+# Release management
+mise run release 0.3.0      # Bump version, tag, and push
+mise run release-dry 0.3.0  # Show what release would do
+
+# Documentation
+mise run doc                # Build and open Rust documentation
+```
+
+All tasks are defined in `mise.toml`. Run `mise tasks` to see the complete list.
 
 ## License
 

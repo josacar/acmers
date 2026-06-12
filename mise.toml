@@ -1,0 +1,140 @@
+[tools]
+rust = "latest"
+
+[tasks.build]
+description = "Build the project"
+run = "cargo build"
+
+[tasks.test]
+description = "Run all tests"
+run = "cargo test"
+
+[tasks.lint]
+description = "Run linter (clippy)"
+run = "cargo clippy --all-targets --all-features -- -D warnings"
+
+[tasks.format]
+description = "Format code"
+run = "cargo fmt --all"
+
+[tasks.format-check]
+description = "Check code formatting"
+run = "cargo fmt --all -- --check"
+
+[tasks.clean]
+description = "Clean build artifacts"
+run = "cargo clean"
+
+[tasks.check]
+description = "Run format-check, lint, and test"
+depends = ["format-check", "lint", "test"]
+
+[tasks.release]
+description = "Bump version, tag, and push (usage: mise run release 0.3.0)"
+run = """
+#!/bin/bash
+set -e
+VERSION={{arg(name="version", var=true)}}
+if [[ -z "$VERSION" ]]; then
+    echo "Usage: mise run release <version>"
+    echo "Example: mise run release 0.3.0"
+    exit 1
+fi
+echo "Bumping version to $VERSION..."
+sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+cat > debian/changelog.new << EOF
+acmers ($VERSION) unstable; urgency=medium
+
+  * Release $VERSION
+
+ -- José Carretero <josacar@users.noreply.github.com>  $(date -R)
+
+EOF
+cat debian/changelog >> debian/changelog.new
+mv debian/changelog.new debian/changelog
+git add Cargo.toml debian/changelog
+git commit -m "Bump version to $VERSION"
+git tag v$VERSION
+git push
+git push origin v$VERSION
+echo "Released v$VERSION"
+echo "GitHub Actions will build .deb packages and create a release"
+"""
+
+[tasks.release-dry]
+description = "Show what release would do without making changes"
+run = """
+#!/bin/bash
+VERSION={{arg(name="version", var=true)}}
+if [[ -z "$VERSION" ]]; then
+    echo "Usage: mise run release-dry <version>"
+    exit 1
+fi
+echo "Would bump version to $VERSION"
+echo "Would update Cargo.toml"
+echo "Would update debian/changelog"
+echo "Would commit changes"
+echo "Would tag v$VERSION"
+echo "Would push to origin"
+"""
+
+[tasks.github-status]
+description = "Check GitHub Actions status for latest push"
+run = "gh run list --limit 5"
+
+[tasks.github-workflows]
+description = "List available GitHub workflows"
+run = "gh workflow list"
+
+[tasks.github-release]
+description = "View latest release"
+run = "gh release view"
+
+[tasks.github-releases]
+description = "List all releases"
+run = "gh release list --limit 10"
+
+[tasks.doc]
+description = "Build documentation"
+run = "cargo doc --no-deps --open"
+
+[tasks.providers]
+description = "Count implemented vs stub providers"
+run = """
+#!/bin/bash
+total=$(ls src/providers/*.rs | grep -v mod.rs | grep -v helpers.rs | wc -l)
+stubs=$(for f in src/providers/*.rs; do
+    name=$(basename "$f" .rs)
+    [[ "$name" == "mod" || "$name" == "helpers" ]] && continue
+    lines=$(wc -l < "$f")
+    has_http=$(rg -c "http::" "$f" 2>/dev/null || echo 0)
+    [[ "$has_http" -eq 0 && "$lines" -le 30 ]] && echo "$name"
+done | wc -l)
+impl=$((total - stubs))
+echo "Implemented: $impl"
+echo "Stubs: $stubs"
+echo "Total: $total"
+"""
+
+[tasks.install]
+description = "Install acmers to ~/.cargo/bin"
+run = "cargo install --path ."
+
+[tasks.debian-build]
+description = "Build Debian package locally"
+run = "dpkg-buildpackage -d -b -us -uc"
+
+[tasks.size]
+description = "Show binary size"
+run = """
+#!/bin/bash
+if [[ -f target/release/acmers ]]; then
+    size=$(ls -lh target/release/acmers | awk '{print $5}')
+    echo "Release binary: $size"
+elif [[ -f target/debug/acmers ]]; then
+    size=$(ls -lh target/debug/acmers | awk '{print $5}')
+    echo "Debug binary: $size (run 'mise run build --release' for optimized size)"
+else
+    echo "No binary found. Run 'mise run build' first."
+fi
+"""

@@ -9,6 +9,22 @@ This file provides instructions for AI agents working on the `acmers` codebase.
 - **No system tool calls** (no `curl`, `openssl`, `dig`) — everything is pure Rust
 - **All providers must implement `DnsProvider`** and be registered in `src/providers/mod.rs`
 
+## Development Tools
+
+This project uses [mise](https://mise.jdx.dev/) for task management. Common operations:
+
+```sh
+mise run build          # cargo build
+mise run test           # cargo test
+mise run lint           # cargo clippy --all-targets --all-features -- -D warnings
+mise run format         # cargo fmt --all
+mise run check          # format-check + lint + test (runs all three)
+mise run providers      # Count implemented vs stub providers
+mise run release 0.3.0  # Bump version, tag, and push (triggers GitHub Actions)
+```
+
+Run `mise tasks` to see all available tasks. All tasks are defined in `mise.toml`.
+
 ## Provider Implementation Pattern
 
 Every DNS provider is a Rust file in `src/providers/` that implements the `DnsProvider` trait.
