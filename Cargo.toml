@@ -1,8 +1,8 @@
 [package]
 name = "acmers"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "Zero-dependency ACME client with DNS-01 challenge support for 165+ providers"
+description = "Zero-dependency ACME client with DNS-01 challenge support for 201 providers"
 license = "MIT"
 
 [dependencies]

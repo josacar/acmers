@@ -1,3 +1,12 @@
+acmers (0.2.0) unstable; urgency=medium
+
+  * Implement 10 provider stubs (Curanet, MyDNS.JP, Linode v3, Online.net,
+    Yandex 360, Yandex PDD, Google Domains, One.com, UnoEuro, OpenProvider XML)
+  * Expand DNS provider coverage from 185 to 195 providers
+  * Update provider documentation with accurate counts
+
+ -- José Carretero <josacar@users.noreply.github.com>  Thu, 12 Jun 2026 00:00:00 +0000
+
 acmers (0.1.0) unstable; urgency=medium
 
   * Initial release.
