@@ -20,10 +20,11 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y debhelper
       - name: Build and package .deb
         run: dpkg-buildpackage -d -b -us -uc
+      - run: mkdir -p dist && mv ../acmers_*.deb dist/
       - uses: actions/upload-artifact@v7
         with:
           name: acmers-${{ matrix.arch }}
-          path: ../acmers_*.deb
+          path: dist/*.deb
 
   release:
     needs: build
