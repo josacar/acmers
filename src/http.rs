@@ -1,22 +1,34 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
 pub static CLIENT: LazyLock<HttpClient> = LazyLock::new(HttpClient::new);
 
-pub static TEST_BASE_URL: LazyLock<std::sync::Mutex<Option<String>>> = LazyLock::new(|| std::sync::Mutex::new(None));
+thread_local! {
+    static TEST_BASE_URL: RefCell<Option<String>> = const { RefCell::new(None) };
+}
 
 pub fn set_test_base(url: &str) {
-    *TEST_BASE_URL.lock().unwrap() = Some(url.to_string());
+    TEST_BASE_URL.with(|cell| *cell.borrow_mut() = Some(url.to_string()));
+}
+
+pub fn clear_test_base() {
+    TEST_BASE_URL.with(|cell| *cell.borrow_mut() = None);
+}
+
+pub fn is_test_mode() -> bool {
+    TEST_BASE_URL.with(|cell| cell.borrow().is_some())
 }
 
 fn rewrite_url(url: &str) -> String {
-    if let Some(base) = TEST_BASE_URL.lock().unwrap().as_ref() {
+    let base = TEST_BASE_URL.with(|cell| cell.borrow().clone());
+    if let Some(base) = base {
         let parsed = url.split('/').collect::<Vec<_>>();
         if parsed.len() >= 4 {
             let path: String = parsed[3..].join("/");
             return format!("{base}/{path}");
         }
-        return base.clone();
+        return base;
     }
     url.to_string()
 }

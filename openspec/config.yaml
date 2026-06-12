@@ -1,0 +1,25 @@
+schema: spec-driven
+
+context: |
+  Project: acmers - Minimal-dependency Rust ACME client CLI
+  Tech stack: Rust (synchronous), ureq 3 (blocking HTTP), serde_json, rcgen 0.14, ring 0.17
+  Constraints:
+    - No async runtime
+    - No system tool calls (no curl, openssl, dig)
+    - All providers must implement DnsProvider trait
+    - Match Debian ureq feature flags for packaging compatibility
+    - TXT records must always be cleaned up, even on errors
+  Domain: DNS providers for ACME DNS-01 challenge validation
+  Current state: 201 DNS providers implemented, 83 tests passing, zero warnings
+
+rules:
+  proposal:
+    - Keep proposals focused on specific provider or feature changes
+    - Include API endpoint references when modifying providers
+    - Document authentication method changes
+  tasks:
+    - Provider fixes should include test updates
+    - Always verify with cargo build and cargo test
+  specs:
+    - Document API endpoints, auth methods, and env vars for each provider
+    - Include example API request/response when relevant

@@ -92,7 +92,7 @@ impl DnsProvider for Kas {
 
 impl Kas {
     fn rate_limit() {
-        if http::TEST_BASE_URL.lock().unwrap().is_none() {
+        if !http::is_test_mode() {
             thread::sleep(Duration::from_secs(RATE_LIMIT_SECS));
         }
     }
