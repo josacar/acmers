@@ -31,3 +31,11 @@ jobs:
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build --release --target ${{ matrix.target }}
+      - name: Package as .deb
+        run: |
+          ARCH="${{ matrix.target == 'x86_64-unknown-linux-gnu' && 'amd64' || 'arm64' }}"
+          ./scripts/build-deb.sh --binary target/${{ matrix.target }}/release/acmers --arch "$ARCH" --output-dir ./dist
+      - uses: actions/upload-artifact@v5
+        with:
+          name: acmers-${{ matrix.target }}
+          path: dist/*.deb
