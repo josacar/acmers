@@ -1,0 +1,76 @@
+.TH ACMERS 1 "2026-06-12" "acmers 0.1.0" "User Commands"
+.SH NAME
+acmers \- zero-dependency ACME client for SSL/TLS certificate automation
+.SH SYNOPSIS
+.B acmers
+\fIcommand\fR [\fIoptions\fR]
+.SH DESCRIPTION
+\fBacmers\fR is a minimal-dependency Rust CLI for automatic SSL/TLS
+certificate issuance and renewal via the ACME protocol (RFC 8555).
+It supports DNS-01 challenge validation for 200+ DNS providers,
+ported from the acme.sh project.
+.PP
+Single binary, zero runtime dependencies beyond glibc.
+.SH COMMANDS
+.TP
+\fBregister\fR \-\-email \fIaddr\fR [\-\-test]
+Register a new ACME account. Use \fB--test\fR for staging environment.
+.TP
+\fBissue\fR \fIdomain\fR... \-\-dns \fIprovider\fR \-\-email \fIaddr\fR [\-\-test] [\-\-dnssleep \fIsecs\fR]
+Issue a certificate for one or more domains using DNS-01 challenge.
+The \fB--dns\fR flag selects the DNS provider (see \fBlist-providers\fR).
+Use \fB--test\fR for staging, \fB--dnssleep\fR to wait for DNS propagation.
+.TP
+\fBrenew\fR \fIdomain\fR [\-\-test]
+Renew an existing certificate for the given domain.
+.TP
+\fBrevoke\fR \fIdomain\fR
+Revoke a certificate for the given domain.
+.TP
+\fBlist\-providers\fR
+List all available DNS providers with their required environment variables.
+.TP
+\fBcron\fR
+Run certificate renewal check (designed for cron/systemd timer use).
+.SH DNS PROVIDERS
+acmers supports 200+ DNS providers. Each provider requires specific
+environment variables for authentication. Run \fBacmers list-providers\fR
+to see the full list and required variables.
+.PP
+Common providers and their environment variables:
+.TP
+\fBcloudflare\fR
+\fBCF_Token\fR or \fBCF_Key\fR + \fBCF_Email\fR
+.TP
+\fBdigitalocean\fR
+\fBDO_API_KEY\fR
+.TP
+\fBroute53\fR
+\fBAWS_ACCESS_KEY_ID\fR + \fBAWS_SECRET_ACCESS_KEY\fR
+.TP
+\fBduckdns\fR
+\fBDuckDNS_Token\fR
+.TP
+\fBhe\fR (Hurricane Electric)
+\fBHE_Username\fR + \fBHE_Password\fR
+.SH FILES
+.TP
+.I ~/.acmers/
+Configuration and account data directory.
+.SH ENVIRONMENT
+All DNS provider credentials are passed via environment variables.
+No credentials are stored on disk beyond the ACME account key.
+.SH EXIT STATUS
+.TP
+0
+Success.
+.TP
+1
+Error occurred (configuration, provider, or ACME protocol error).
+.SH SEE ALSO
+.BR certbot (1),
+.BR openssl (1)
+.PP
+Project homepage: \fIhttps://github.com/josacar/acmers\fR
+.SH BUGS
+Report issues at \fIhttps://github.com/josacar/acmers/issues\fR

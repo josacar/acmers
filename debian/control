@@ -1,0 +1,13 @@
+Source: acmers
+Package: acmers
+Version: 0.1.0
+Section: utils
+Priority: optional
+Maintainer: José Carretero <josacar@users.noreply.github.com>
+Architecture: any
+Depends: libc6 (>= 2.35)
+Description: Zero-dependency ACME client with DNS-01 challenge support
+ acmers is a minimal-dependency Rust CLI for automatic SSL/TLS
+ certificate issuance and renewal via the ACME protocol (RFC 8555).
+ It supports 200+ DNS providers for DNS-01 challenge validation,
+ ported from the acme.sh project.

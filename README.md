@@ -12,7 +12,11 @@ dependencies** — no system tools needed. Single binary, no runtime, no surpris
 ## Quick Start
 
 ```sh
-# Install from crates.io
+# Debian/Ubuntu (.deb package)
+# Download from GitHub Releases: https://github.com/josacar/acmers/releases
+sudo dpkg -i acmers_0.1.0_amd64.deb
+
+# Or from crates.io
 cargo install acmers
 
 # Or build from source
@@ -20,6 +24,9 @@ git clone https://github.com/josacar/acmers.git
 cd acmers
 cargo build --release
 ```
+
+Debian packages require glibc >= 2.35 (Debian 12+, Ubuntu 22.04+). amd64 and arm64
+architectures are available.
 
 ### Register an ACME account
 
