@@ -218,18 +218,23 @@ There are **201 provider files** in `src/providers/`, all registered in `src/pro
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| **Implemented** | 185 | Full API calls via `http::` functions |
-| **Stub** | 16 | Return `Error::Provider` with deprecation/guidance messages |
+| **Implemented** | 195 | Full API calls via `http::` functions or native protocols |
+| **Stub** | 6 | Require external CLI tools or have no API |
 
-### Stub providers (16)
+### Stub providers (6)
 
 Stubs are ~28-line files with no HTTP calls. They return `Err(Error::Provider(...))` from `add_txt`
-with a message directing users to an alternative. Categories:
+with a message directing users to an alternative. The remaining stubs all require external CLI tools
+or have no DNS management API:
 
-- **Deprecated redirects** (8): `linode` → `linode_v4`, `online` → `scaleway`, `openprovider` → `openprovider_rest`, `unoeuro` → `simply`, `yandex` → `yandex360`, `hetzner` → `hetznercloud`, `googledomains` → `gcloud`, `yandex360` → `yc`
-- **Unsupported protocol** (4): `knot`, `nsd` (DNS UPDATE — use `nsupdate`), `df`, `mydnsjp` (no TXT API)
-- **Require external CLI** (2): `lexicon` (Python CLI), `samba` (samba-tool)
-- **Not yet implemented** (2): `curanet`, `one` (interactive login)
+| Slug | Reason | Alternative |
+|------|--------|-------------|
+| `df` | DynDNSFree.de has no TXT API | — |
+| `hetzner` | Robot doesn't manage DNS zones | `--dns hetznercloud` |
+| `knot` | Requires knsupdate CLI | `--dns nsupdate` |
+| `lexicon` | Requires lexicon Python CLI | Use lexicon CLI directly |
+| `nsd` | Requires nsupdate CLI | `--dns nsupdate` |
+| `samba` | Requires samba-tool CLI | — |
 
 ### Non-HTTP providers (real implementations)
 
