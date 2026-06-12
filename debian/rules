@@ -1,3 +1,18 @@
 #!/usr/bin/make -f
+
+export CARGO_HOME = $(CURDIR)/debian/cargo-home
+export CARGO_TARGET_DIR = $(CURDIR)/target
+
 %:
-	dh $@
+	dh $@ --buildsystem=cargo
+
+override_dh_auto_install:
+	cargo install --root debian/acmers --path . --locked
+	mkdir -p debian/acmers/usr/share/man/man1
+	cp debian/acmers.1 debian/acmers/usr/share/man/man1/
+
+override_dh_installinit:
+	dh_installinit --name acmers
+
+override_dh_auto_clean:
+	rm -rf debian/cargo-home

@@ -1,11 +1,28 @@
 Source: acmers
-Package: acmers
-Version: 0.1.0
 Section: utils
 Priority: optional
 Maintainer: José Carretero <josacar@users.noreply.github.com>
+Build-Depends:
+ debhelper-compat (= 13),
+ cargo:native,
+ rustc:native,
+ librust-serde-json-dev,
+ librust-ureq-dev,
+ librust-rcgen-dev (>= 0.14),
+ librust-ring-dev (>= 0.17),
+ librust-lexopt-dev (>= 0.3),
+ librust-time-dev (>= 0.3),
+ librust-x509-parser-dev (>= 0.18),
+ librust-rustls-pki-types-dev (>= 1),
+Standards-Version: 4.7.0
+Rules-Requires-Root: no
+Homepage: https://github.com/josacar/acmers
+Vcs-Git: https://github.com/josacar/acmers.git
+Vcs-Browser: https://github.com/josacar/acmers
+
+Package: acmers
 Architecture: any
-Depends: libc6 (>= 2.35)
+Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: Zero-dependency ACME client with DNS-01 challenge support
  acmers is a minimal-dependency Rust CLI for automatic SSL/TLS
  certificate issuance and renewal via the ACME protocol (RFC 8555).

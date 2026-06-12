@@ -1,2 +1,4 @@
-acmers usr/bin/
-debian/acmers.1 usr/share/man/man1/
+usr/bin/acmers
+usr/share/man/man1/acmers.1
+lib/systemd/system/acmers.service
+lib/systemd/system/acmers.timer

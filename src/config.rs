@@ -40,7 +40,26 @@ impl Config {
     }
 }
 
+fn is_root() -> bool {
+    std::fs::read_to_string("/proc/self/status")
+        .map(|s| {
+            s.lines()
+                .find(|l| l.starts_with("Uid:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .map_or(false, |u| u == "0")
+        })
+        .unwrap_or(false)
+}
+
 pub fn get_home_dir() -> Result<PathBuf, Error> {
+    if let Ok(dir) = std::env::var("ACMERS_HOME") {
+        return Ok(PathBuf::from(dir));
+    }
+
+    if is_root() {
+        return Ok(PathBuf::from("/var/lib/acmers"));
+    }
+
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .map_err(|_| Error::Config("cannot find home directory".into()))?;

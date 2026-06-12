@@ -1,0 +1,16 @@
+[Unit]
+Description=acmers certificate renewal
+Documentation=man:acmers(1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/acmers cron
+StateDirectory=acmers
+ProtectSystem=strict
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

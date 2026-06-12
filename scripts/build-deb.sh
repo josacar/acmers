@@ -63,6 +63,8 @@ mkdir -p "$PKG_DIR/DEBIAN"
 mkdir -p "$PKG_DIR/usr/bin"
 mkdir -p "$PKG_DIR/usr/share/man/man1"
 mkdir -p "$PKG_DIR/usr/share/doc/$PKG_NAME"
+mkdir -p "$PKG_DIR/lib/systemd/system"
+mkdir -p "$PKG_DIR/var/lib/$PKG_NAME"
 
 cp "$BINARY" "$PKG_DIR/usr/bin/$PKG_NAME"
 chmod 755 "$PKG_DIR/usr/bin/$PKG_NAME"
@@ -74,6 +76,21 @@ fi
 
 cp "$PROJECT_DIR/README.md" "$PKG_DIR/usr/share/doc/$PKG_NAME/"
 cp "$PROJECT_DIR/LICENSE" "$PKG_DIR/usr/share/doc/$PKG_NAME/copyright"
+
+if [[ -f "$PROJECT_DIR/debian/acmers.service" ]]; then
+    cp "$PROJECT_DIR/debian/acmers.service" "$PKG_DIR/lib/systemd/system/"
+fi
+if [[ -f "$PROJECT_DIR/debian/acmers.timer" ]]; then
+    cp "$PROJECT_DIR/debian/acmers.timer" "$PKG_DIR/lib/systemd/system/"
+fi
+if [[ -f "$PROJECT_DIR/debian/postinst" ]]; then
+    cp "$PROJECT_DIR/debian/postinst" "$PKG_DIR/DEBIAN/postinst"
+    chmod 755 "$PKG_DIR/DEBIAN/postinst"
+fi
+if [[ -f "$PROJECT_DIR/debian/postrm" ]]; then
+    cp "$PROJECT_DIR/debian/postrm" "$PKG_DIR/DEBIAN/postrm"
+    chmod 755 "$PKG_DIR/DEBIAN/postrm"
+fi
 
 INSTALLED_SIZE=$(du -sk "$PKG_DIR" | cut -f1)
 
