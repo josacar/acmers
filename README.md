@@ -178,27 +178,55 @@ Each provider implements the `DnsProvider` trait with `add_txt` and `remove_txt`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| **Implemented** | 68 | Full API calls (add/remove TXT records) |
-| **Stub** | 133 | No-op stubs, ready for implementation |
+| **Implemented** | 185 | Full API calls (add/remove TXT records) |
+| **Stub** | 16 | Deprecated redirects, unsupported, or awaiting implementation |
 
-### Implemented Providers (68)
+### Implemented Providers (185)
 
 **Cloud/DNS platforms:** AWS Route53, Google Cloud DNS, Azure DNS, Aliyun, TencentCloud,
 OVH, DNSPod.cn, Yandex Cloud, Cloudflare, DigitalOcean, GoDaddy, Gandi, Porkbun,
-Namecheap, Name.com, DNSimple, Vercel, Linode v4, Hetzner Cloud, IONOS
+Namecheap, Name.com, DNSimple, Vercel, Linode v4, Hetzner Cloud, IONOS, IONOS Cloud,
+Oracle Cloud (OCI), Huawei Cloud, Baidu Cloud, JD Cloud, Scaleway
 
-**Managed DNS:** ClouDNS, Bunny DNS, deSEC, Njalla, Netlify, Scaleway, Constellix,
-Vultr, Exoscale, Dynv6, Rage4, G-Core, EdgeCenter, ACME-DNS
+**Managed DNS:** ClouDNS, Bunny DNS, deSEC, Njalla, Netlify, Constellix,
+Vultr, Exoscale, Dynv6, Rage4, G-Core, EdgeCenter, ACME-DNS, NS1, NSD/NSUpdate,
+PowerDNS, Infoblox, EfficientIP, MaraDNS, Technitium, LuaDNS, Zonomi, Zilore
 
 **Hosting/deployment:** DirectAdmin, Active24, Simply.com (UnoEuro), Mythic Beasts,
-World4You, Variomedia, Domeneshop, RackCorp, Vscale, ConoHa, EUServ
+World4You, Variomedia, Domeneshop, RackCorp, Vscale, ConoHa, EUServ, CPanel,
+HestiaCP, Plesk, ISPConfig, DreamHost, Cyon, Fornex, Hosttech, Infomaniak
 
-**Simple DNS:** DuckDNS, FreeMyIP, HE DDNS, DreamHost, DNSExit
+**Simple DNS:** DuckDNS, FreeMyIP, HE DDNS, DNSExit, Dynu, FreeDNS, DynDNS
 
 **Region-specific:** PointHQ (NZ), Misaka.io (JP), SiteHost (NZ), BookMyName (DE),
-Websupport (SK), Infomaniak (CH), MyDevil (PL), Mijn.host (NL), Nodion (DE),
-Internet.bs (BS), DurableDNS (US), OpenProvider REST (NL), Alwaysdata (FR), Restena (LU),
-Timeweb Cloud (RU), EasyDNS (CA), Technitium (IN)
+Websupport (SK), MyDevil (PL), Mijn.host (NL), Nodion (DE), Internet.bs (BS),
+DurableDNS (US), OpenProvider REST (NL), Alwaysdata (FR), Restena (LU),
+Timeweb Cloud (RU), EasyDNS (CA), Arvan (IR), Azion (BR), Sotoon (IR),
+Geoscaling, Alviy, Kinghost (BR), ANX (AT), Area7, Artfiles, Beget, DNSServices
+
+### Stub Providers (16)
+
+These providers return an error with guidance. Most are deprecated redirects to a
+newer alternative.
+
+| Slug | Reason | Alternative |
+|------|--------|-------------|
+| `curanet` | Not yet implemented | Contribute at GitHub |
+| `df` | No TXT record support | — |
+| `googledomains` | Complex API | `--dns gcloud` |
+| `hetzner` | Robot doesn't manage DNS | `--dns hetznercloud` |
+| `knot` | DNS UPDATE protocol | `--dns nsupdate` |
+| `lexicon` | Requires CLI tool | Use lexicon CLI directly |
+| `linode` | API v3 deprecated | `--dns linode_v4` |
+| `mydnsjp` | No TXT record support | — |
+| `nsd` | DNS UPDATE protocol | `--dns nsupdate` |
+| `one` | Requires interactive login | Contribute at GitHub |
+| `online` | Rebranded to Scaleway | `--dns scaleway` |
+| `openprovider` | XML API deprecated | `--dns openprovider_rest` |
+| `samba` | Requires samba-tool CLI | — |
+| `unoeuro` | Rebranded to Simply.com | `--dns simply` |
+| `yandex` | PDD deprecated | `--dns yandex360` |
+| `yandex360` | Needs OAuth2 credentials | `--dns yc` |
 
 ### Adding a Provider
 

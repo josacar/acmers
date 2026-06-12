@@ -212,6 +212,39 @@ cargo test --test integration
 cargo build 2>&1 | grep warning
 ```
 
+## Provider Landscape
+
+There are **201 provider files** in `src/providers/`, all registered in `src/providers/mod.rs`.
+
+| Status | Count | Description |
+|--------|-------|-------------|
+| **Implemented** | 185 | Full API calls via `http::` functions |
+| **Stub** | 16 | Return `Error::Provider` with deprecation/guidance messages |
+
+### Stub providers (16)
+
+Stubs are ~28-line files with no HTTP calls. They return `Err(Error::Provider(...))` from `add_txt`
+with a message directing users to an alternative. Categories:
+
+- **Deprecated redirects** (8): `linode` → `linode_v4`, `online` → `scaleway`, `openprovider` → `openprovider_rest`, `unoeuro` → `simply`, `yandex` → `yandex360`, `hetzner` → `hetznercloud`, `googledomains` → `gcloud`, `yandex360` → `yc`
+- **Unsupported protocol** (4): `knot`, `nsd` (DNS UPDATE — use `nsupdate`), `df`, `mydnsjp` (no TXT API)
+- **Require external CLI** (2): `lexicon` (Python CLI), `samba` (samba-tool)
+- **Not yet implemented** (2): `curanet`, `one` (interactive login)
+
+### Non-HTTP providers (real implementations)
+
+Two providers don't use `http::` but are fully implemented:
+- `nsupdate` (738 lines) — DNS UPDATE protocol via UDP/TCP sockets
+- `maradns` (324 lines) — MaraDNS zone file manipulation
+
+### How to identify a stub
+
+A stub provider file:
+1. Is exactly ~28 lines
+2. Contains zero `http::` calls
+3. Returns `Err(Error::Provider(...))` from `add_txt` with guidance text
+4. `remove_txt` returns `Ok(())` (no-op)
+
 ## File Structure Reference
 
 | File | Purpose |
