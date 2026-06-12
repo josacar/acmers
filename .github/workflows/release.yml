@@ -17,6 +17,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y debhelper
       - name: Build and package .deb
         run: dpkg-buildpackage -d -b -us -uc
       - uses: actions/upload-artifact@v7
