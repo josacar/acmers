@@ -25,6 +25,17 @@ mise run release 0.3.0  # Bump version, tag, and push (triggers GitHub Actions)
 
 Run `mise tasks` to see all available tasks. All tasks are defined in `mise.toml`.
 
+## Mandatory Workflow for All Changes
+
+**Every code change MUST follow this workflow using openspec skills:**
+
+1. **Propose the change** — Use the `openspec-propose` skill to create a new change with proposal, design, specs, and tasks artifacts
+2. **Implement the change** — Work through the tasks defined in the change
+3. **Sync specs** — Use the `openspec-sync-specs` skill to update main specs from the change
+4. **Archive when done** — Use the `openspec-archive-change` skill to archive the completed change
+
+This workflow ensures all changes are documented, designed, and tracked in `openspec/changes/`. Do not implement changes without first proposing them through openspec.
+
 ## Provider Implementation Pattern
 
 Every DNS provider is a Rust file in `src/providers/` that implements the `DnsProvider` trait.
