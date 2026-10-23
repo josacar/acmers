@@ -35,8 +35,14 @@ impl InfobloxUddi {
     fn api_get(&self, endpoint: &str) -> Result<http::Response, Error> {
         let url = format!("{}/{}", self.api_base(), endpoint);
         let auth = format!("Token {}", self.api_key);
-        http::get(&url, &[("Authorization", &auth), ("Content-Type", "application/json")])
-            .map_err(|e| Error::Provider(format!("infoblox_uddi GET: {e}")))
+        http::get(
+            &url,
+            &[
+                ("Authorization", &auth),
+                ("Content-Type", "application/json"),
+            ],
+        )
+        .map_err(|e| Error::Provider(format!("infoblox_uddi GET: {e}")))
     }
 
     fn api_post(&self, endpoint: &str, body: &[u8]) -> Result<http::Response, Error> {
@@ -49,8 +55,14 @@ impl InfobloxUddi {
     fn api_delete(&self, endpoint: &str) -> Result<http::Response, Error> {
         let url = format!("{}/{}", self.api_base(), endpoint);
         let auth = format!("Token {}", self.api_key);
-        http::delete(&url, &[("Authorization", &auth), ("Content-Type", "application/json")])
-            .map_err(|e| Error::Provider(format!("infoblox_uddi DELETE: {e}")))
+        http::delete(
+            &url,
+            &[
+                ("Authorization", &auth),
+                ("Content-Type", "application/json"),
+            ],
+        )
+        .map_err(|e| Error::Provider(format!("infoblox_uddi DELETE: {e}")))
     }
 
     fn find_zone(&self, fulldomain: &str) -> Result<(String, String, String), Error> {
@@ -76,7 +88,9 @@ impl InfobloxUddi {
             let resp = self.api_get(&endpoint)?;
 
             if resp.status == 401 {
-                return Err(Error::Provider("infoblox_uddi: authentication failed. Check Infoblox_UDDI_Key.".into()));
+                return Err(Error::Provider(
+                    "infoblox_uddi: authentication failed. Check Infoblox_UDDI_Key.".into(),
+                ));
             }
 
             if resp.status >= 400 {
@@ -88,22 +102,24 @@ impl InfobloxUddi {
 
             if let Some(results) = v.get("results").and_then(|r| r.as_array()) {
                 for zone in results {
-                    if let Some(id) = zone.get("id").and_then(|i| i.as_str()) {
-                        if id.starts_with("dns/auth_zone/") {
-                            let sub_domain = if h == fulldomain {
-                                String::new()
-                            } else {
-                                let cut_len = fulldomain.len() - h.len() - 1;
-                                fulldomain[..cut_len].to_string()
-                            };
-                            return Ok((id.to_string(), sub_domain, h));
-                        }
+                    if let Some(id) = zone.get("id").and_then(|i| i.as_str())
+                        && id.starts_with("dns/auth_zone/")
+                    {
+                        let sub_domain = if h == fulldomain {
+                            String::new()
+                        } else {
+                            let cut_len = fulldomain.len() - h.len() - 1;
+                            fulldomain[..cut_len].to_string()
+                        };
+                        return Ok((id.to_string(), sub_domain, h));
                     }
                 }
             }
         }
 
-        Err(Error::Provider(format!("infoblox_uddi: zone not found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "infoblox_uddi: zone not found for {fulldomain}"
+        )))
     }
 }
 
@@ -117,9 +133,11 @@ impl DnsProvider for InfobloxUddi {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("Infoblox_UDDI_Key")
+        let api_key = env
+            .get("Infoblox_UDDI_Key")
             .ok_or_else(|| Error::Config("Infoblox_UDDI_Key required".into()))?;
-        let portal = env.get("Infoblox_Portal")
+        let portal = env
+            .get("Infoblox_Portal")
             .ok_or_else(|| Error::Config("Infoblox_Portal required".into()))?;
         Ok(Box::new(InfobloxUddi {
             api_key: api_key.clone(),
@@ -151,21 +169,27 @@ impl DnsProvider for InfobloxUddi {
             return Ok(());
         }
 
-        if let Ok(v) = serde_json::from_str::<Value>(&resp.body) {
-            if let Some(err) = v.get("error").or_else(|| v.get("Error")) {
-                let err_str = err.to_string();
-                if err_str.contains("already exists") || err_str.contains("duplicate") {
-                    return Ok(());
-                }
-                return Err(Error::Provider(format!("infoblox_uddi add TXT: {}", resp.body)));
+        if let Ok(v) = serde_json::from_str::<Value>(&resp.body)
+            && let Some(err) = v.get("error").or_else(|| v.get("Error"))
+        {
+            let err_str = err.to_string();
+            if err_str.contains("already exists") || err_str.contains("duplicate") {
+                return Ok(());
             }
+            return Err(Error::Provider(format!(
+                "infoblox_uddi add TXT: {}",
+                resp.body
+            )));
         }
 
         if resp.status < 400 {
             return Ok(());
         }
 
-        Err(Error::Provider(format!("infoblox_uddi add TXT: HTTP {} {}", resp.status, resp.body)))
+        Err(Error::Provider(format!(
+            "infoblox_uddi add TXT: HTTP {} {}",
+            resp.status, resp.body
+        )))
     }
 
     fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -202,7 +226,8 @@ impl DnsProvider for InfobloxUddi {
             return Ok(());
         }
 
-        let record_id = v.get("results")
+        let record_id = v
+            .get("results")
             .and_then(|r| r.as_array())
             .and_then(|arr| arr.first())
             .and_then(|r| r.get("id"))
@@ -214,7 +239,11 @@ impl DnsProvider for InfobloxUddi {
             None => return Ok(()),
         };
 
-        let record_uuid = record_id.rsplit('/').next().unwrap_or(&record_id).to_string();
+        let record_uuid = record_id
+            .rsplit('/')
+            .next()
+            .unwrap_or(&record_id)
+            .to_string();
 
         let resp = match self.api_delete(&format!("dns/record/{}", record_uuid)) {
             Ok(r) => r,
@@ -225,7 +254,10 @@ impl DnsProvider for InfobloxUddi {
         };
 
         if resp.status >= 400 {
-            eprintln!("warning: infoblox_uddi cleanup: HTTP {} {}", resp.status, resp.body);
+            eprintln!(
+                "warning: infoblox_uddi cleanup: HTTP {} {}",
+                resp.status, resp.body
+            );
             return Ok(());
         }
 

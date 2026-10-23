@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -21,13 +21,16 @@ impl DnsProvider for Pmiab {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("PMIAB_Username")
+        let username = env
+            .get("PMIAB_Username")
             .ok_or_else(|| Error::Config("PMIAB_Username required".into()))?
             .clone();
-        let password = env.get("PMIAB_Password")
+        let password = env
+            .get("PMIAB_Password")
             .ok_or_else(|| Error::Config("PMIAB_Password required".into()))?
             .clone();
-        let server = env.get("PMIAB_Server")
+        let server = env
+            .get("PMIAB_Server")
             .ok_or_else(|| Error::Config("PMIAB_Server required".into()))?
             .clone();
         let creds = format!("{username}:{password}");
@@ -43,10 +46,18 @@ impl DnsProvider for Pmiab {
             "value": value,
         });
         let url = format!("https://{}/admin/dns/custom/{domain}", self.server);
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
-            .map_err(|e| Error::Provider(format!("pmiab add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("pmiab add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("pmiab add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "pmiab add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -73,8 +84,14 @@ impl DnsProvider for Pmiab {
                         "rtype": "TXT",
                         "value": "",
                     });
-                    let del_url = format!("https://{}/admin/dns/custom/{domain}/{name}", self.server);
-                    let _ = http::post(&del_url, &serde_json::to_vec(&del_body).unwrap(), "application/json", headers);
+                    let del_url =
+                        format!("https://{}/admin/dns/custom/{domain}/{name}", self.server);
+                    let _ = http::post(
+                        &del_url,
+                        &serde_json::to_vec(&del_body).unwrap(),
+                        "application/json",
+                        headers,
+                    );
                     return Ok(());
                 }
             }

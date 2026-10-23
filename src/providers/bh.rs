@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -21,10 +21,14 @@ impl DnsProvider for BestHosting {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_user = env.get("BH_API_USER")
-            .ok_or_else(|| Error::Config("BH_API_USER required".into()))?.clone();
-        let api_key = env.get("BH_API_KEY")
-            .ok_or_else(|| Error::Config("BH_API_KEY required".into()))?.clone();
+        let api_user = env
+            .get("BH_API_USER")
+            .ok_or_else(|| Error::Config("BH_API_USER required".into()))?
+            .clone();
+        let api_key = env
+            .get("BH_API_KEY")
+            .ok_or_else(|| Error::Config("BH_API_KEY required".into()))?
+            .clone();
         Ok(Box::new(BestHosting { api_user, api_key }))
     }
 
@@ -33,12 +37,18 @@ impl DnsProvider for BestHosting {
         let url = "https://best-hosting.cz/api/v1/dns";
         let body = serde_json::json!({"fulldomain": fulldomain, "txtvalue": value});
         let auth = self.auth_header();
-        let resp = http::post(url, &serde_json::to_vec(&body).unwrap(), "application/json", &[
-            ("Authorization", &auth),
-            ("Accept", "application/json"),
-        ]).map_err(|e| Error::Provider(format!("bh add TXT: {e}")))?;
+        let resp = http::post(
+            url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth), ("Accept", "application/json")],
+        )
+        .map_err(|e| Error::Provider(format!("bh add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("bh add TXT: HTTP {}: {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "bh add TXT: HTTP {}: {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("bh add TXT response: {e}")))?;
@@ -71,12 +81,16 @@ impl BestHosting {
     fn find_record(&self, fulldomain: &str, value: &str) -> Result<Option<String>, Error> {
         let url = "https://best-hosting.cz/api/v1/dns";
         let auth = self.auth_header();
-        let resp = http::get(url, &[
-            ("Authorization", &auth),
-            ("Accept", "application/json"),
-        ]).map_err(|e| Error::Provider(format!("bh list DNS: {e}")))?;
+        let resp = http::get(
+            url,
+            &[("Authorization", &auth), ("Accept", "application/json")],
+        )
+        .map_err(|e| Error::Provider(format!("bh list DNS: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("bh list DNS: HTTP {}: {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "bh list DNS: HTTP {}: {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("bh list DNS response: {e}")))?;
@@ -85,16 +99,18 @@ impl BestHosting {
                 let rname = record.get("name").and_then(|n| n.as_str()).unwrap_or("");
                 let rcontent = record.get("content").and_then(|c| c.as_str()).unwrap_or("");
                 let rtype = record.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                if rname == fulldomain && rcontent == value && rtype == "TXT" {
-                    if let Some(id) = record.get("id") {
-                        let id_str = if id.is_number() {
-                            id.as_i64().map(|n| n.to_string())
-                        } else {
-                            id.as_str().map(|s| s.to_string())
-                        };
-                        if let Some(id_str) = id_str {
-                            return Ok(Some(id_str));
-                        }
+                if rname == fulldomain
+                    && rcontent == value
+                    && rtype == "TXT"
+                    && let Some(id) = record.get("id")
+                {
+                    let id_str = if id.is_number() {
+                        id.as_i64().map(|n| n.to_string())
+                    } else {
+                        id.as_str().map(|s| s.to_string())
+                    };
+                    if let Some(id_str) = id_str {
+                        return Ok(Some(id_str));
                     }
                 }
             }
@@ -105,12 +121,16 @@ impl BestHosting {
     fn delete_record(&self, id: &str) -> Result<(), Error> {
         let url = format!("https://best-hosting.cz/api/v1/dns/{id}");
         let auth = self.auth_header();
-        let resp = http::delete(&url, &[
-            ("Authorization", &auth),
-            ("Accept", "application/json"),
-        ]).map_err(|e| Error::Provider(format!("bh delete DNS: {e}")))?;
+        let resp = http::delete(
+            &url,
+            &[("Authorization", &auth), ("Accept", "application/json")],
+        )
+        .map_err(|e| Error::Provider(format!("bh delete DNS: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("bh delete DNS: HTTP {}: {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "bh delete DNS: HTTP {}: {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }

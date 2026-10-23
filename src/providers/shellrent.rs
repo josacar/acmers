@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -20,10 +20,12 @@ impl DnsProvider for Shellrent {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("SHELLRENT_Username")
+        let username = env
+            .get("SHELLRENT_Username")
             .ok_or_else(|| Error::Config("SHELLRENT_Username required".into()))?
             .clone();
-        let password = env.get("SHELLRENT_Password")
+        let password = env
+            .get("SHELLRENT_Password")
             .ok_or_else(|| Error::Config("SHELLRENT_Password required".into()))?
             .clone();
         let creds = format!("{username}:{password}");
@@ -41,10 +43,18 @@ impl DnsProvider for Shellrent {
             "ttl": 120,
         });
         let url = format!("https://api.shellrent.com/v1/domains/{zone_id}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
-            .map_err(|e| Error::Provider(format!("shellrent add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("shellrent add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("shellrent add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "shellrent add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -69,14 +79,18 @@ impl DnsProvider for Shellrent {
                 if r.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && r.get("name").and_then(|n| n.as_str()) == Some(name)
                     && r.get("content").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = r.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = r.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.shellrent.com/v1/domains/{zone_id}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url =
+                        format!("https://api.shellrent.com/v1/domains/{zone_id}/records/{id}");
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }
@@ -93,14 +107,20 @@ impl Shellrent {
             .map_err(|e| Error::Json(format!("shellrent parse domains: {e}")))?;
         if let Some(arr) = v.as_array() {
             for d in arr {
-                if let Some(nm) = d.get("name").or_else(|| d.get("domain")).and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        if let Some(id) = d.get("id").and_then(|i| {
-                            if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                        }) {
-                            return Ok(id);
+                if let Some(nm) = d
+                    .get("name")
+                    .or_else(|| d.get("domain"))
+                    .and_then(|n| n.as_str())
+                    && (domain == nm || domain.ends_with(&format!(".{nm}")))
+                    && let Some(id) = d.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
                         }
-                    }
+                    })
+                {
+                    return Ok(id);
                 }
             }
         }

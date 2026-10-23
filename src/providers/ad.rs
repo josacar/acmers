@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -20,7 +20,8 @@ impl DnsProvider for Alwaysdata {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("AD_API_KEY")
+        let api_key = env
+            .get("AD_API_KEY")
             .ok_or_else(|| Error::Config("AD_API_KEY required".into()))?
             .clone();
         let creds = format!("{api_key}:");
@@ -36,12 +37,16 @@ impl DnsProvider for Alwaysdata {
             "name": name,
             "value": value,
             "ttl": 120,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.alwaysdata.com/v1/domain/{domain_id}/record");
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("Alwaysdata add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Alwaysdata add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Alwaysdata add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -71,14 +76,18 @@ impl DnsProvider for Alwaysdata {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("value").and_then(|v| v.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.alwaysdata.com/v1/domain/{domain_id}/record/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url =
+                        format!("https://api.alwaysdata.com/v1/domain/{domain_id}/record/{id}");
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }
@@ -92,17 +101,22 @@ impl Alwaysdata {
             .map_err(|e| Error::Provider(format!("Alwaysdata list domains: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Alwaysdata domains: {e}")))?;
-        let domains = v.get("data").and_then(|d| d.as_array())
+        let domains = v
+            .get("data")
+            .and_then(|d| d.as_array())
             .or_else(|| v.as_array());
         if let Some(domains) = domains {
             for d in domains {
                 if d.get("name").and_then(|n| n.as_str()) == Some(domain)
+                    && let Some(id) = d.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = d.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        return Ok(id);
-                    }
+                    return Ok(id);
                 }
             }
         }

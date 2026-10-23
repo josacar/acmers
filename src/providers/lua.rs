@@ -1,9 +1,10 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Luadns {
@@ -20,10 +21,12 @@ impl DnsProvider for Luadns {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let email = env.get("LUA_Email")
+        let email = env
+            .get("LUA_Email")
             .ok_or_else(|| Error::Config("LUA_Email required".into()))?
             .clone();
-        let key = env.get("LUA_Key")
+        let key = env
+            .get("LUA_Key")
             .ok_or_else(|| Error::Config("LUA_Key required".into()))?
             .clone();
         let creds = format!("{email}:{key}");
@@ -37,12 +40,17 @@ impl DnsProvider for Luadns {
         let body = serde_json::json!({
             "type": "TXT",
             "name": name,
-            "content": format!("\"{value}\""),
+            "content": helpers::txt_value(value),
             "ttl": 120,
         });
         let url = format!("https://api.luadns.com/v1/zones/{zone_id}/records");
-        http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
-            .map_err(|e| Error::Provider(format!("lua add TXT: {e}")))?;
+        http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("lua add TXT: {e}")))?;
         Ok(())
     }
 
@@ -61,20 +69,23 @@ impl DnsProvider for Luadns {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let quoted_value = format!("\"{value}\"");
+        let quoted_value = helpers::txt_value(value);
         if let Some(records) = v.as_array() {
             for r in records {
                 if r.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && r.get("name").and_then(|n| n.as_str()) == Some(name)
                     && r.get("content").and_then(|c| c.as_str()) == Some(&quoted_value)
+                    && let Some(id) = r.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = r.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.luadns.com/v1/zones/{zone_id}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url = format!("https://api.luadns.com/v1/zones/{zone_id}/records/{id}");
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }
@@ -91,14 +102,17 @@ impl Luadns {
             .map_err(|e| Error::Json(format!("lua parse zones: {e}")))?;
         if let Some(arr) = v.as_array() {
             for z in arr {
-                if let Some(nm) = z.get("name").and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        if let Some(id) = z.get("id").and_then(|i| {
-                            if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                        }) {
-                            return Ok(id);
+                if let Some(nm) = z.get("name").and_then(|n| n.as_str())
+                    && (domain == nm || domain.ends_with(&format!(".{nm}")))
+                    && let Some(id) = z.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
                         }
-                    }
+                    })
+                {
+                    return Ok(id);
                 }
             }
         }

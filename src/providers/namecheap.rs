@@ -19,10 +19,12 @@ impl DnsProvider for Namecheap {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("NAMECHEAP_API_KEY")
+        let api_key = env
+            .get("NAMECHEAP_API_KEY")
             .ok_or_else(|| Error::Config("NAMECHEAP_API_KEY required".into()))?
             .clone();
-        let username = env.get("NAMECHEAP_USERNAME")
+        let username = env
+            .get("NAMECHEAP_USERNAME")
             .ok_or_else(|| Error::Config("NAMECHEAP_USERNAME required".into()))?
             .clone();
         Ok(Box::new(Namecheap { api_key, username }))
@@ -31,9 +33,7 @@ impl DnsProvider for Namecheap {
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
         let (sld, tld) = split_domain(domain);
         let mut existing = self.get_hosts(sld, tld).unwrap_or_default();
-        existing.retain(|h| {
-            !(h.host_type == "TXT" && h.name == name && h.address == value)
-        });
+        existing.retain(|h| !(h.host_type == "TXT" && h.name == name && h.address == value));
         existing.push(HostRecord {
             name: name.to_string(),
             host_type: "TXT".to_string(),
@@ -50,9 +50,7 @@ impl DnsProvider for Namecheap {
             Ok(h) => h,
             Err(_) => return Ok(()),
         };
-        existing.retain(|h| {
-            !(h.host_type == "TXT" && h.name == name && h.address == value)
-        });
+        existing.retain(|h| !(h.host_type == "TXT" && h.name == name && h.address == value));
         let _ = self.set_hosts(sld, tld, &existing);
         Ok(())
     }
@@ -79,7 +77,8 @@ impl Namecheap {
         let url = format!(
             "{}&Command=namecheap.domains.dns.getHosts&SLD={}&TLD={}",
             self.api_base(),
-            sld, tld,
+            sld,
+            tld,
         );
         let resp = http::get(&url, &[])
             .map_err(|e| Error::Provider(format!("Namecheap getHosts: {e}")))?;
@@ -144,7 +143,9 @@ fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }

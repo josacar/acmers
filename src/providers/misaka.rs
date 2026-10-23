@@ -1,8 +1,9 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 const API_BASE: &str = "https://dnsapi.misaka.io/dns";
@@ -21,7 +22,8 @@ impl DnsProvider for Misaka {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("Misaka_Key")
+        let key = env
+            .get("Misaka_Key")
             .ok_or_else(|| Error::Config("Misaka_Key required".into()))?
             .clone();
         let token_auth = format!("Token {key}");
@@ -35,34 +37,45 @@ impl DnsProvider for Misaka {
         let resp = http::get(&search_url, headers)
             .map_err(|e| Error::Provider(format!("Misaka search records: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Misaka search records: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Misaka search records: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Misaka search: {e}")))?;
         let count = count_txt_records(&v, &sub);
-        let txt_value = format!("\"{}\"", value);
+        let txt_value = helpers::txt_value(value);
         if count == 0 {
             let body = serde_json::to_vec(&serde_json::json!({
                 "records": [{"value": txt_value}],
                 "filters": [],
                 "ttl": 1,
-            })).unwrap();
+            }))
+            .unwrap();
             let url = format!("{API_BASE}/zones/{zone}/recordsets/{sub}/TXT");
             let resp = http::post(&url, &body, "application/json", headers)
                 .map_err(|e| Error::Provider(format!("Misaka add TXT: {e}")))?;
             if resp.status >= 400 {
-                return Err(Error::Provider(format!("Misaka add TXT: HTTP {} {}", resp.status, resp.body)));
+                return Err(Error::Provider(format!(
+                    "Misaka add TXT: HTTP {} {}",
+                    resp.status, resp.body
+                )));
             }
         } else {
             let body = serde_json::to_vec(&serde_json::json!({
                 "records": [{"value": txt_value}],
                 "ttl": 1,
-            })).unwrap();
+            }))
+            .unwrap();
             let url = format!("{API_BASE}/zones/{zone}/recordsets/{sub}/TXT?append=true");
             let resp = http::put(&url, &body, "application/json", headers)
                 .map_err(|e| Error::Provider(format!("Misaka update TXT: {e}")))?;
             if resp.status >= 400 {
-                return Err(Error::Provider(format!("Misaka update TXT: HTTP {} {}", resp.status, resp.body)));
+                return Err(Error::Provider(format!(
+                    "Misaka update TXT: HTTP {} {}",
+                    resp.status, resp.body
+                )));
             }
         }
         Ok(())
@@ -81,17 +94,31 @@ impl DnsProvider for Misaka {
 }
 
 impl Misaka {
-    fn resolve_zone(&self, domain: &str, fulldomain: &str, headers: &[(&str, &str)]) -> Result<(String, String), Error> {
+    fn resolve_zone(
+        &self,
+        domain: &str,
+        fulldomain: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<(String, String), Error> {
         let url = format!("{API_BASE}/zones?limit=1000");
         let resp = http::get(&url, headers)
             .map_err(|e| Error::Provider(format!("Misaka list zones: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Misaka list zones: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Misaka list zones: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Misaka zones: {e}")))?;
-        let zones: Vec<&str> = v.get("results").and_then(|r| r.as_array())
-            .map(|arr| arr.iter().filter_map(|z| z.get("name").and_then(|n| n.as_str())).collect())
+        let zones: Vec<&str> = v
+            .get("results")
+            .and_then(|r| r.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|z| z.get("name").and_then(|n| n.as_str()))
+                    .collect()
+            })
             .unwrap_or_default();
         let parts: Vec<&str> = fulldomain.split('.').collect();
         for i in 1..parts.len() {

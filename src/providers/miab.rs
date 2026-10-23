@@ -14,10 +14,13 @@ impl Miab {
     fn resolve_zone(&self, fulldomain: &str) -> Result<String, Error> {
         let headers: &[(&str, &str)] = &[("Authorization", &self.basic_auth)];
         let url = format!("https://{}/admin/dns/zones", self.server);
-        let resp = http::get(&url, headers)
-            .map_err(|e| Error::Provider(format!("miab zones: {e}")))?;
+        let resp =
+            http::get(&url, headers).map_err(|e| Error::Provider(format!("miab zones: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("miab zones: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "miab zones: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let zones: Vec<String> = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Provider(format!("miab zones: {e}")))?;
@@ -28,7 +31,9 @@ impl Miab {
                 return Ok(test);
             }
         }
-        Err(Error::Provider(format!("miab: no zone found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "miab: no zone found for {fulldomain}"
+        )))
     }
 }
 
@@ -42,13 +47,16 @@ impl DnsProvider for Miab {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("MIAB_Username")
+        let username = env
+            .get("MIAB_Username")
             .ok_or_else(|| Error::Config("MIAB_Username required".into()))?
             .clone();
-        let password = env.get("MIAB_Password")
+        let password = env
+            .get("MIAB_Password")
             .ok_or_else(|| Error::Config("MIAB_Password required".into()))?
             .clone();
-        let server = env.get("MIAB_Server")
+        let server = env
+            .get("MIAB_Server")
             .ok_or_else(|| Error::Config("MIAB_Server required".into()))?
             .clone();
         let creds = format!("{username}:{password}");
@@ -63,7 +71,10 @@ impl DnsProvider for Miab {
         let resp = http::post(&url, value.as_bytes(), "text/plain", headers)
             .map_err(|e| Error::Provider(format!("miab add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("miab add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "miab add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -75,7 +86,10 @@ impl DnsProvider for Miab {
         let resp = http::delete_with_body(&url, value.as_bytes(), "text/plain", headers)
             .map_err(|e| Error::Provider(format!("miab remove TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("miab remove TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "miab remove TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }

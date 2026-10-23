@@ -19,10 +19,12 @@ impl DnsProvider for Zoneedit {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let id = env.get("ZONEEDIT_ID")
+        let id = env
+            .get("ZONEEDIT_ID")
             .ok_or_else(|| Error::Config("ZONEEDIT_ID required".into()))?
             .clone();
-        let token = env.get("ZONEEDIT_Token")
+        let token = env
+            .get("ZONEEDIT_Token")
             .ok_or_else(|| Error::Config("ZONEEDIT_Token required".into()))?
             .clone();
         let creds = format!("{id}:{token}");
@@ -53,8 +55,8 @@ impl Zoneedit {
         let mut tries = 3u8;
         loop {
             tries -= 1;
-            let resp = http::get(url, headers)
-                .map_err(|e| Error::Provider(format!("zoneedit: {e}")))?;
+            let resp =
+                http::get(url, headers).map_err(|e| Error::Provider(format!("zoneedit: {e}")))?;
             if resp.body.contains("SUCCESS") && resp.body.contains("200") {
                 if is_delete {
                     std::thread::sleep(std::time::Duration::from_secs(2));
@@ -63,7 +65,8 @@ impl Zoneedit {
             }
             if tries == 0 {
                 return Err(Error::Provider(format!(
-                    "zoneedit: exhausted retries, last response: {}", resp.body
+                    "zoneedit: exhausted retries, last response: {}",
+                    resp.body
                 )));
             }
             let wait = Self::parse_ratelimit(&resp.body).unwrap_or(10);

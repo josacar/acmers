@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 const BASE_URL: &str = "https://1984.hosting";
@@ -26,10 +27,12 @@ impl DnsProvider for Hosting1984 {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("One984HOSTING_Username")
+        let username = env
+            .get("One984HOSTING_Username")
             .ok_or_else(|| Error::Config("One984HOSTING_Username required".into()))?
             .clone();
-        let password = env.get("One984HOSTING_Password")
+        let password = env
+            .get("One984HOSTING_Password")
             .ok_or_else(|| Error::Config("One984HOSTING_Password required".into()))?
             .clone();
         Ok(Box::new(Hosting1984 { username, password }))
@@ -38,11 +41,11 @@ impl DnsProvider for Hosting1984 {
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
         let session = self.login()?;
         let (sub_domain, zone) = self.get_root(name, &session)?;
-        let encoded_value = url_encode(value);
+        let encoded_value = helpers::url_encode_form(value);
         let form = format!(
             "entry=new&type=TXT&ttl=900&zone={}&host={}&rdata=%22{}%22",
-            url_encode(&zone),
-            url_encode(&sub_domain),
+            helpers::url_encode_form(&zone),
+            helpers::url_encode_form(&sub_domain),
             encoded_value,
         );
         let zone_id = self.get_zone_id(&zone, &session)?;
@@ -53,16 +56,29 @@ impl DnsProvider for Hosting1984 {
             ("X-CSRFToken", &session.csrf_token),
         ];
         let url = format!("{BASE_URL}/domains/entry/");
-        let resp = http::post(&url, form.as_bytes(), "application/x-www-form-urlencoded", headers)
-            .map_err(|e| Error::Provider(format!("Hosting1984 add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("Hosting1984 add TXT: {e}")))?;
         if resp.body.contains("\"haserrors\": true") || resp.body.contains("\"haserrors\":true") {
-            return Err(Error::Provider(format!("Hosting1984 add TXT: haserrors: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "Hosting1984 add TXT: haserrors: {}",
+                resp.body
+            )));
         }
         if resp.body.contains("html>") {
-            return Err(Error::Provider(format!("Hosting1984 add TXT: got HTML: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "Hosting1984 add TXT: got HTML: {}",
+                resp.body
+            )));
         }
         if resp.body.contains("\"auth\": false") || resp.body.contains("\"auth\":false") {
-            return Err(Error::Provider("Hosting1984 add TXT: invalid or expired cookie".into()));
+            return Err(Error::Provider(
+                "Hosting1984 add TXT: invalid or expired cookie".into(),
+            ));
         }
         Ok(())
     }
@@ -98,7 +114,12 @@ impl DnsProvider for Hosting1984 {
             ("Referer", &referer),
             ("X-CSRFToken", &session.csrf_token),
         ];
-        match http::post(&del_url, del_form.as_bytes(), "application/x-www-form-urlencoded", post_headers) {
+        match http::post(
+            &del_url,
+            del_form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            post_headers,
+        ) {
             Ok(resp) => {
                 if !resp.body.contains("\"ok\": true") && !resp.body.contains("\"ok\":true") {
                     eprintln!("warning: Hosting1984 delete TXT: {}", resp.body);
@@ -126,8 +147,8 @@ impl Hosting1984 {
         let csrf_header = csrf_cookie.clone();
         let form = format!(
             "username={}&password={}&otpkey=",
-            url_encode(&self.username),
-            url_encode(&self.password),
+            helpers::url_encode_form(&self.username),
+            helpers::url_encode_form(&self.password),
         );
         let headers: &[(&str, &str)] = &[
             ("Cookie", &cookies),
@@ -135,16 +156,23 @@ impl Hosting1984 {
             ("X-CSRFToken", &csrf_header),
         ];
         let auth_url = format!("{BASE_URL}/api/auth/");
-        let resp = http::post(&auth_url, form.as_bytes(), "application/x-www-form-urlencoded", headers)
-            .map_err(|e| Error::Provider(format!("Hosting1984 login: {e}")))?;
+        let resp = http::post(
+            &auth_url,
+            form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("Hosting1984 login: {e}")))?;
         if !resp.body.contains("\"loggedin\": true") && !resp.body.contains("\"loggedin\":true") {
-            return Err(Error::Provider(format!("Hosting1984 login failed for user {}", self.username)));
+            return Err(Error::Provider(format!(
+                "Hosting1984 login failed for user {}",
+                self.username
+            )));
         }
         let new_cookies = extract_cookies(&resp);
-        let final_csrf = extract_cookie_value(&new_cookies, "csrftoken")
-            .unwrap_or(csrf_cookie);
-        let final_session = extract_cookie_value(&new_cookies, "cookie1984nammnamm")
-            .unwrap_or(session_cookie);
+        let final_csrf = extract_cookie_value(&new_cookies, "csrftoken").unwrap_or(csrf_cookie);
+        let final_session =
+            extract_cookie_value(&new_cookies, "cookie1984nammnamm").unwrap_or(session_cookie);
         let final_cookies = format!("csrftoken={final_csrf}; cookie1984nammnamm={final_session}");
         Ok(Session {
             cookies: final_cookies,
@@ -170,7 +198,9 @@ impl Hosting1984 {
                 return Ok((sub_domain, h));
             }
         }
-        Err(Error::Provider(format!("Hosting1984: could not find zone for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "Hosting1984: could not find zone for {fulldomain}"
+        )))
     }
 
     fn get_zone_id(&self, zone: &str, session: &Session) -> Result<String, Error> {
@@ -178,8 +208,9 @@ impl Hosting1984 {
         let headers: &[(&str, &str)] = &[("Cookie", &session.cookies)];
         let resp = http::get(&url, headers)
             .map_err(|e| Error::Provider(format!("Hosting1984 get zone_id: {e}")))?;
-        find_zone_id(&resp.body, zone)
-            .ok_or_else(|| Error::Provider(format!("Hosting1984: could not find zone_id for {zone}")))
+        find_zone_id(&resp.body, zone).ok_or_else(|| {
+            Error::Provider(format!("Hosting1984: could not find zone_id for {zone}"))
+        })
     }
 }
 
@@ -203,10 +234,10 @@ fn extract_cookies(resp: &http::Response) -> String {
 fn extract_cookie_value(cookies: &str, name: &str) -> Option<String> {
     for part in cookies.split(';') {
         let part = part.trim();
-        if let Some(eq) = part.find('=') {
-            if part[..eq].trim() == name {
-                return Some(part[eq + 1..].trim().to_string());
-            }
+        if let Some(eq) = part.find('=')
+            && part[..eq].trim() == name
+        {
+            return Some(part[eq + 1..].trim().to_string());
         }
     }
     None
@@ -218,7 +249,9 @@ fn find_zone_id(html: &str, zone: &str) -> Option<String> {
     loop {
         let pos = search.find(marker)?;
         let after = &search[pos + marker.len()..];
-        let end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+        let end = after
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(after.len());
         if end == 0 {
             search = after;
             continue;
@@ -240,44 +273,23 @@ fn find_entry_id(html: &str, value: &str) -> Option<String> {
     loop {
         let pos = search.find(marker)?;
         let after = &search[pos + marker.len()..];
-        let end = after.find(|c: char| !c.is_ascii_digit()).unwrap_or(after.len());
+        let end = after
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(after.len());
         if end == 0 {
             search = after;
             continue;
         }
         let id = &after[..end];
         let line_start = search[..pos].rfind('\n').map(|p| p + 1).unwrap_or(0);
-        let line_end = search[pos..].find('\n').map(|p| pos + p).unwrap_or(search.len());
+        let line_end = search[pos..]
+            .find('\n')
+            .map(|p| pos + p)
+            .unwrap_or(search.len());
         let line = &search[line_start..line_end];
         if line.contains(value) {
             return Some(id.to_string());
         }
         search = after;
-    }
-}
-
-fn url_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            b' ' => out.push('+'),
-            _ => {
-                out.push('%');
-                out.push(hex((b >> 4) & 0xf));
-                out.push(hex(b & 0xf));
-            }
-        }
-    }
-    out
-}
-
-fn hex(n: u8) -> char {
-    if n < 10 {
-        (b'0' + n) as char
-    } else {
-        (b'A' + n - 10) as char
     }
 }

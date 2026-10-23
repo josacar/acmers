@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for Vercel {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("VERCEL_TOKEN")
+        let token = env
+            .get("VERCEL_TOKEN")
             .ok_or_else(|| Error::Config("VERCEL_TOKEN required".into()))?
             .clone();
         Ok(Box::new(Vercel { token }))
@@ -32,13 +33,17 @@ impl DnsProvider for Vercel {
             "name": name,
             "value": value,
             "ttl": 60,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.vercel.com/v2/domains/{domain}/records");
         let resp = http::post(&url, &body, "application/json", &[("Authorization", &auth)])
             .map_err(|e| Error::Provider(format!("Vercel add TXT: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Vercel response: {e}")))?;
-        if let Some(err) = v.get("error").and_then(|e| e.get("message").and_then(|m| m.as_str())) {
+        if let Some(err) = v
+            .get("error")
+            .and_then(|e| e.get("message").and_then(|m| m.as_str()))
+        {
             return Err(Error::Provider(format!("Vercel add TXT: {err}")));
         }
         Ok(())
@@ -60,12 +65,12 @@ impl DnsProvider for Vercel {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("value").and_then(|v| v.as_str()) == Some(value)
+                    && let Some(uid) = record.get("uid").and_then(|u| u.as_str())
                 {
-                    if let Some(uid) = record.get("uid").and_then(|u| u.as_str()) {
-                        let del_url = format!("https://api.vercel.com/v2/domains/{domain}/records/{uid}");
-                        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
-                        return Ok(());
-                    }
+                    let del_url =
+                        format!("https://api.vercel.com/v2/domains/{domain}/records/{uid}");
+                    let _ = http::delete(&del_url, &[("Authorization", &auth)]);
+                    return Ok(());
                 }
             }
         }

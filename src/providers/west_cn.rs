@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -13,14 +13,22 @@ pub struct WestCn {
 }
 
 impl DnsProvider for WestCn {
-    fn slug() -> &'static str { "west_cn" }
-    fn env_vars() -> &'static [&'static str] { &["WEST_Username", "WEST_Key"] }
+    fn slug() -> &'static str {
+        "west_cn"
+    }
+    fn env_vars() -> &'static [&'static str] {
+        &["WEST_Username", "WEST_Key"]
+    }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("WEST_Username")
-            .ok_or_else(|| Error::Config("WEST_Username required".into()))?.clone();
-        let apikey = env.get("WEST_Key")
-            .ok_or_else(|| Error::Config("WEST_Key required".into()))?.clone();
+        let username = env
+            .get("WEST_Username")
+            .ok_or_else(|| Error::Config("WEST_Username required".into()))?
+            .clone();
+        let apikey = env
+            .get("WEST_Key")
+            .ok_or_else(|| Error::Config("WEST_Key required".into()))?
+            .clone();
         Ok(Box::new(WestCn { username, apikey }))
     }
 
@@ -34,10 +42,18 @@ impl DnsProvider for WestCn {
             urlencode(value),
         );
         let url = format!("{BASE_URL}/domain/dns/");
-        let resp = http::post(&url, form.as_bytes(), "application/x-www-form-urlencoded", &[])
-            .map_err(|e| Error::Provider(format!("west_cn add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[],
+        )
+        .map_err(|e| Error::Provider(format!("west_cn add TXT: {e}")))?;
         if resp.status >= 400 || !resp.body.contains("success") {
-            return Err(Error::Provider(format!("west_cn add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "west_cn add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -51,7 +67,12 @@ impl DnsProvider for WestCn {
             urlencode(name),
         );
         let url = format!("{BASE_URL}/domain/dns/");
-        let resp = match http::post(&url, list_form.as_bytes(), "application/x-www-form-urlencoded", &[]) {
+        let resp = match http::post(
+            &url,
+            list_form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[],
+        ) {
             Ok(r) => r,
             Err(_) => return Ok(()),
         };
@@ -62,31 +83,45 @@ impl DnsProvider for WestCn {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records = v.get("data").and_then(|d| d.as_array())
+        let records = v
+            .get("data")
+            .and_then(|d| d.as_array())
             .or_else(|| v.as_array());
         if let Some(records) = records {
             for record in records {
-                let matches_value = record.get("record_value").and_then(|v| v.as_str()) == Some(value)
+                let matches_value = record.get("record_value").and_then(|v| v.as_str())
+                    == Some(value)
                     || record.get("value").and_then(|v| v.as_str()) == Some(value);
-                let matches_type = record.get("record_type").and_then(|t| t.as_str()) == Some("TXT")
+                let matches_type = record.get("record_type").and_then(|t| t.as_str())
+                    == Some("TXT")
                     || record.get("type").and_then(|t| t.as_str()) == Some("TXT");
-                if matches_value && matches_type {
-                    if let Some(id) = record.get("record_id").and_then(|i| {
-                        if i.is_u64() { Some(i.as_u64().unwrap().to_string()) }
-                        else if i.is_string() { Some(i.as_str().unwrap().to_string()) }
-                        else { None }
-                    }) {
-                        let del_form = format!(
-                            "act=dnsrec.remove&username={}&apikey={}&domain={}&hostname={}&record_id={}",
-                            urlencode(&self.username),
-                            urlencode(&self.apikey),
-                            urlencode(name),
-                            urlencode(name),
-                            urlencode(&id),
-                        );
-                        let _ = http::post(&url, del_form.as_bytes(), "application/x-www-form-urlencoded", &[]);
-                        return Ok(());
-                    }
+                if matches_value
+                    && matches_type
+                    && let Some(id) = record.get("record_id").and_then(|i| {
+                        if i.is_u64() {
+                            Some(i.as_u64().unwrap().to_string())
+                        } else if i.is_string() {
+                            Some(i.as_str().unwrap().to_string())
+                        } else {
+                            None
+                        }
+                    })
+                {
+                    let del_form = format!(
+                        "act=dnsrec.remove&username={}&apikey={}&domain={}&hostname={}&record_id={}",
+                        urlencode(&self.username),
+                        urlencode(&self.apikey),
+                        urlencode(name),
+                        urlencode(name),
+                        urlencode(&id),
+                    );
+                    let _ = http::post(
+                        &url,
+                        del_form.as_bytes(),
+                        "application/x-www-form-urlencoded",
+                        &[],
+                    );
+                    return Ok(());
                 }
             }
         }

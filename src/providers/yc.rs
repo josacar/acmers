@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use ring::rand::SystemRandom;
-use ring::signature::{RsaKeyPair, RSA_PSS_SHA256};
+use ring::signature::{RSA_PSS_SHA256, RsaKeyPair};
 use serde_json::Value;
 
 use crate::error::Error;
@@ -22,17 +22,26 @@ impl DnsProvider for Yc {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["YC_SA_ID", "YC_SA_Key_ID", "YC_SA_Key_File_Path", "YC_Folder_ID", "YC_Zone_ID"]
+        &[
+            "YC_SA_ID",
+            "YC_SA_Key_ID",
+            "YC_SA_Key_File_Path",
+            "YC_Folder_ID",
+            "YC_Zone_ID",
+        ]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let sa_id = env.get("YC_SA_ID")
+        let sa_id = env
+            .get("YC_SA_ID")
             .ok_or_else(|| Error::Config("YC_SA_ID required".into()))?
             .clone();
-        let sa_key_id = env.get("YC_SA_Key_ID")
+        let sa_key_id = env
+            .get("YC_SA_Key_ID")
             .ok_or_else(|| Error::Config("YC_SA_Key_ID required".into()))?
             .clone();
-        let key_file_path = env.get("YC_SA_Key_File_Path")
+        let key_file_path = env
+            .get("YC_SA_Key_File_Path")
             .ok_or_else(|| Error::Config("YC_SA_Key_File_Path required".into()))?;
         let key_pem = std::fs::read_to_string(key_file_path)
             .map_err(|e| Error::Config(format!("YC_SA_Key_File_Path: {e}")))?;
@@ -43,7 +52,13 @@ impl DnsProvider for Yc {
             return Err(Error::Config("YC_Folder_ID or YC_Zone_ID required".into()));
         }
 
-        Ok(Box::new(Yc { sa_id, sa_key_id, key_pem, folder_id, zone_id }))
+        Ok(Box::new(Yc {
+            sa_id,
+            sa_key_id,
+            key_pem,
+            folder_id,
+            zone_id,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -59,12 +74,17 @@ impl DnsProvider for Yc {
                 "ttl": 120,
                 "data": [value],
             }]
-        })).unwrap();
-        let url = format!("https://dns.api.cloud.yandex.net/dns/v1/zones/{zone_id}:upsertRecordSets");
+        }))
+        .unwrap();
+        let url =
+            format!("https://dns.api.cloud.yandex.net/dns/v1/zones/{zone_id}:upsertRecordSets");
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("YC add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("YC add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "YC add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -107,8 +127,10 @@ impl DnsProvider for Yc {
                 "ttl": ttl,
                 "data": data,
             }]
-        })).unwrap();
-        let url = format!("https://dns.api.cloud.yandex.net/dns/v1/zones/{zone_id}:updateRecordSets");
+        }))
+        .unwrap();
+        let url =
+            format!("https://dns.api.cloud.yandex.net/dns/v1/zones/{zone_id}:updateRecordSets");
         let _ = http::post(&url, &body, "application/json", headers);
         Ok(())
     }
@@ -136,9 +158,7 @@ impl Yc {
         let token = v
             .get("iamToken")
             .and_then(|t| t.as_str())
-            .ok_or_else(|| {
-                Error::Provider(format!("YC IAM auth: no token: {}", resp.body))
-            })?;
+            .ok_or_else(|| Error::Provider(format!("YC IAM auth: no token: {}", resp.body)))?;
         Ok(token.to_string())
     }
 
@@ -156,12 +176,10 @@ impl Yc {
             "exp": now + 1200,
         });
 
-        let header_b64 = crate::base64::encode_no_pad(
-            serde_json::to_string(&header).unwrap().as_bytes(),
-        );
-        let payload_b64 = crate::base64::encode_no_pad(
-            serde_json::to_string(&payload).unwrap().as_bytes(),
-        );
+        let header_b64 =
+            crate::base64::encode_no_pad(serde_json::to_string(&header).unwrap().as_bytes());
+        let payload_b64 =
+            crate::base64::encode_no_pad(serde_json::to_string(&payload).unwrap().as_bytes());
         let signing_input = format!("{header_b64}.{payload_b64}");
 
         let der = pem_to_der(&self.key_pem)?;
@@ -171,12 +189,7 @@ impl Yc {
         let rng = SystemRandom::new();
         let mut sig = vec![0u8; key_pair.public().modulus_len()];
         key_pair
-            .sign(
-                &RSA_PSS_SHA256,
-                &rng,
-                signing_input.as_bytes(),
-                &mut sig,
-            )
+            .sign(&RSA_PSS_SHA256, &rng, signing_input.as_bytes(), &mut sig)
             .map_err(|e| Error::Crypto(format!("YC JWT sign: {e}")))?;
 
         let sig_b64 = crate::base64::encode_no_pad(&sig);
@@ -190,9 +203,7 @@ impl Yc {
         headers: &[(&str, &str)],
     ) -> Result<(String, String), Error> {
         if let Some(ref zone_id) = self.zone_id {
-            let url = format!(
-                "https://dns.api.cloud.yandex.net/dns/v1/zones/{zone_id}"
-            );
+            let url = format!("https://dns.api.cloud.yandex.net/dns/v1/zones/{zone_id}");
             let resp = http::get(&url, headers)
                 .map_err(|e| Error::Provider(format!("YC get zone: {e}")))?;
             if resp.status >= 400 {
@@ -215,33 +226,30 @@ impl Yc {
             .folder_id
             .as_ref()
             .ok_or_else(|| Error::Config("YC_Folder_ID required".into()))?;
-        let url = format!(
-            "https://dns.api.cloud.yandex.net/dns/v1/zones?folderId={folder_id}"
-        );
-        let resp = http::get(&url, headers)
-            .map_err(|e| Error::Provider(format!("YC list zones: {e}")))?;
+        let url = format!("https://dns.api.cloud.yandex.net/dns/v1/zones?folderId={folder_id}");
+        let resp =
+            http::get(&url, headers).map_err(|e| Error::Provider(format!("YC list zones: {e}")))?;
         if resp.status >= 400 {
             return Err(Error::Provider(format!(
                 "YC list zones: HTTP {} {}",
                 resp.status, resp.body
             )));
         }
-        let v: Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("YC zones: {e}")))?;
+        let v: Value =
+            serde_json::from_str(&resp.body).map_err(|e| Error::Json(format!("YC zones: {e}")))?;
 
         let fulldomain = format!("{name}.");
         if let Some(zones) = v.get("dnsZones").and_then(|z| z.as_array()) {
             for zone in zones {
-                let zone_name =
-                    zone.get("zone").and_then(|z| z.as_str()).unwrap_or("");
+                let zone_name = zone.get("zone").and_then(|z| z.as_str()).unwrap_or("");
                 if zone_name.is_empty() {
                     continue;
                 }
-                if fulldomain.ends_with(zone_name) || fulldomain == zone_name {
-                    if let Some(id) = zone.get("id").and_then(|i| i.as_str()) {
-                        let sub_domain = compute_sub_domain(name, zone_name);
-                        return Ok((id.to_string(), sub_domain));
-                    }
+                if (fulldomain.ends_with(zone_name) || fulldomain == zone_name)
+                    && let Some(id) = zone.get("id").and_then(|i| i.as_str())
+                {
+                    let sub_domain = compute_sub_domain(name, zone_name);
+                    return Ok((id.to_string(), sub_domain));
                 }
             }
         }

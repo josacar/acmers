@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use ring::digest::{digest, SHA256};
-use ring::signature::{RsaKeyPair, RSA_PKCS1_SHA256, KeyPair as RingKeyPair};
+use ring::digest::{SHA256, digest};
 use ring::rand::SystemRandom;
+use ring::signature::{KeyPair as RingKeyPair, RSA_PKCS1_SHA256, RsaKeyPair};
 
 use crate::base64;
 use crate::error::Error;
@@ -27,13 +27,12 @@ impl DnsProvider for Oci {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let config_file = env.get("OCI_CLI_CONFIG_FILE")
-            .cloned()
-            .unwrap_or_else(|| {
-                let home = std::env::var("HOME").unwrap_or_default();
-                format!("{home}/.oci/config")
-            });
-        let profile = env.get("OCI_CLI_PROFILE")
+        let config_file = env.get("OCI_CLI_CONFIG_FILE").cloned().unwrap_or_else(|| {
+            let home = std::env::var("HOME").unwrap_or_default();
+            format!("{home}/.oci/config")
+        });
+        let profile = env
+            .get("OCI_CLI_PROFILE")
             .cloned()
             .unwrap_or_else(|| "DEFAULT".to_string());
 
@@ -44,9 +43,23 @@ impl DnsProvider for Oci {
             String::new()
         };
 
-        let tenancy = resolve_env_or_ini(env, &ini, &profile, "OCI_CLI_TENANCY", "OCI_TENANCY", "tenancy")?;
+        let tenancy = resolve_env_or_ini(
+            env,
+            &ini,
+            &profile,
+            "OCI_CLI_TENANCY",
+            "OCI_TENANCY",
+            "tenancy",
+        )?;
         let user = resolve_env_or_ini(env, &ini, &profile, "OCI_CLI_USER", "OCI_USER", "user")?;
-        let region = resolve_env_or_ini(env, &ini, &profile, "OCI_CLI_REGION", "OCI_REGION", "region")?;
+        let region = resolve_env_or_ini(
+            env,
+            &ini,
+            &profile,
+            "OCI_CLI_REGION",
+            "OCI_REGION",
+            "region",
+        )?;
 
         let pem = if let Some(k) = env.get("OCI_PRIVKEY") {
             if k.contains("BEGIN") {
@@ -68,7 +81,9 @@ impl DnsProvider for Oci {
                 return Err(Error::Config(format!("OCI key_file not found: {key_file}")));
             }
         } else {
-            return Err(Error::Config("OCI_PRIVKEY or key_file in config required".into()));
+            return Err(Error::Config(
+                "OCI_PRIVKEY or key_file in config required".into(),
+            ));
         };
 
         let der = pem_to_der(&pem)?;
@@ -76,7 +91,13 @@ impl DnsProvider for Oci {
             .map_err(|e| Error::Crypto(format!("parse OCI RSA key: {e}")))?;
         let fingerprint = compute_fingerprint(&key_pair);
 
-        Ok(Box::new(Oci { tenancy, user, region, key_pair, fingerprint }))
+        Ok(Box::new(Oci {
+            tenancy,
+            user,
+            region,
+            key_pair,
+            fingerprint,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -95,7 +116,10 @@ impl DnsProvider for Oci {
         let path = format!("/20180115/zones/{zone}/records");
         let resp = self.signed_request("PATCH", &path, Some(body_str.as_bytes()))?;
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("OCI add TXT: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "OCI add TXT: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -138,7 +162,12 @@ impl Oci {
         Err(Error::Provider(format!("zone not found for {fqdn}")))
     }
 
-    fn signed_request(&self, method: &str, target: &str, body: Option<&[u8]>) -> Result<http::Response, Error> {
+    fn signed_request(
+        &self,
+        method: &str,
+        target: &str,
+        body: Option<&[u8]>,
+    ) -> Result<http::Response, Error> {
         let host = format!("dns.{}.oraclecloud.com", self.region);
         let key_id = format!("{}/{}/{}", self.tenancy, self.user, self.fingerprint);
         let date = rfc1123_date();
@@ -174,20 +203,19 @@ impl Oci {
 
         let url = format!("https://{}{}", host, target);
 
-        let mut headers: Vec<(&str, &str)> = vec![
-            ("Date", &date),
-            ("Host", &host),
-            ("Authorization", &auth),
-        ];
+        let mut headers: Vec<(&str, &str)> =
+            vec![("Date", &date), ("Host", &host), ("Authorization", &auth)];
 
-        let extra_refs: Vec<(&str, &str)> = extra_headers.iter()
+        let extra_refs: Vec<(&str, &str)> = extra_headers
+            .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
         headers.extend(extra_refs);
 
         match method {
-            "GET" => http::get(&url, &headers)
-                .map_err(|e| Error::Provider(format!("OCI GET: {e}"))),
+            "GET" => {
+                http::get(&url, &headers).map_err(|e| Error::Provider(format!("OCI GET: {e}")))
+            }
             "PATCH" => {
                 let body_bytes = body.unwrap_or(&[]);
                 http::patch(&url, body_bytes, "application/json", &headers)
@@ -212,12 +240,15 @@ fn resolve_env_or_ini(
     if let Some(v) = env.get(cli_var).filter(|s| !s.is_empty()) {
         return Ok(v.clone());
     }
-    if let Some(v) = read_ini(ini, profile, ini_key) {
-        if !v.is_empty() {
-            return Ok(v);
-        }
+    if let Some(v) = read_ini(ini, profile, ini_key)
+        && !v.is_empty()
+    {
+        return Ok(v);
     }
-    Err(Error::Config(format!("{} or {} required", short_var, cli_var)))
+    Err(Error::Config(format!(
+        "{} or {} required",
+        short_var, cli_var
+    )))
 }
 
 fn read_ini(content: &str, section: &str, key: &str) -> Option<String> {
@@ -229,24 +260,23 @@ fn read_ini(content: &str, section: &str, key: &str) -> Option<String> {
             in_section = trimmed.eq_ignore_ascii_case(&section_header);
             continue;
         }
-        if in_section {
-            if let Some((k, v)) = trimmed.split_once('=') {
-                if k.trim() == key {
-                    return Some(v.trim().to_string());
-                }
-            }
+        if in_section
+            && let Some((k, v)) = trimmed.split_once('=')
+            && k.trim() == key
+        {
+            return Some(v.trim().to_string());
         }
     }
     None
 }
 
 fn pem_to_der(pem: &str) -> Result<Vec<u8>, Error> {
-    let b64: String = pem.lines()
+    let b64: String = pem
+        .lines()
         .filter(|l| !l.starts_with("-----"))
         .collect::<Vec<_>>()
         .join("");
-    base64::decode_std(&b64)
-        .map_err(|e| Error::Crypto(format!("decode PEM: {e}")).into())
+    base64::decode_std(&b64).map_err(|e| Error::Crypto(format!("decode PEM: {e}")))
 }
 
 fn compute_fingerprint(key_pair: &RsaKeyPair) -> String {
@@ -261,7 +291,8 @@ fn compute_fingerprint(key_pair: &RsaKeyPair) -> String {
 fn rsa_sign(key_pair: &RsaKeyPair, data: &[u8]) -> Result<String, Error> {
     let rng = SystemRandom::new();
     let mut sig = vec![0u8; key_pair.public().modulus_len()];
-    key_pair.sign(&RSA_PKCS1_SHA256, &rng, data, &mut sig)
+    key_pair
+        .sign(&RSA_PKCS1_SHA256, &rng, data, &mut sig)
         .map_err(|e| Error::Crypto(format!("RSA sign: {e}")))?;
     Ok(base64::encode_std(&sig))
 }
@@ -293,7 +324,13 @@ fn rfc1123_date() -> String {
     };
     format!(
         "{}, {:02} {} {:04} {:02}:{:02}:{:02} GMT",
-        weekday, now.day(), month, now.year(), now.hour(), now.minute(), now.second()
+        weekday,
+        now.day(),
+        month,
+        now.year(),
+        now.hour(),
+        now.minute(),
+        now.second()
     )
 }
 
@@ -323,106 +360,138 @@ fn md5_hash(data: &[u8]) -> [u8; 16] {
 
 fn md5_transform(state: &mut [u32; 4], block: &[u8; 64]) {
     let mut x = [0u32; 16];
-        for i in 0..16 {
-            x[i] = u32::from_le_bytes([
-                block[i * 4],
-                block[i * 4 + 1],
-                block[i * 4 + 2],
-                block[i * 4 + 3],
-            ]);
-        }
+    for i in 0..16 {
+        x[i] = u32::from_le_bytes([
+            block[i * 4],
+            block[i * 4 + 1],
+            block[i * 4 + 2],
+            block[i * 4 + 3],
+        ]);
+    }
 
-        let (mut a, mut b, mut c, mut d) = (state[0], state[1], state[2], state[3]);
+    let (mut a, mut b, mut c, mut d) = (state[0], state[1], state[2], state[3]);
 
-        const S11: u32 = 7;  const S12: u32 = 12; const S13: u32 = 17; const S14: u32 = 22;
-        const S21: u32 = 5;  const S22: u32 = 9;  const S23: u32 = 14; const S24: u32 = 20;
-        const S31: u32 = 4;  const S32: u32 = 11; const S33: u32 = 16; const S34: u32 = 23;
-        const S41: u32 = 6;  const S42: u32 = 10; const S43: u32 = 15; const S44: u32 = 21;
+    const S11: u32 = 7;
+    const S12: u32 = 12;
+    const S13: u32 = 17;
+    const S14: u32 = 22;
+    const S21: u32 = 5;
+    const S22: u32 = 9;
+    const S23: u32 = 14;
+    const S24: u32 = 20;
+    const S31: u32 = 4;
+    const S32: u32 = 11;
+    const S33: u32 = 16;
+    const S34: u32 = 23;
+    const S41: u32 = 6;
+    const S42: u32 = 10;
+    const S43: u32 = 15;
+    const S44: u32 = 21;
 
-        macro_rules! ff { ($a:expr, $b:expr, $c:expr, $d:expr, $x:expr, $s:expr, $ac:expr) => {
-            $a = $a.wrapping_add((($b & $c) | (!$b & $d))).wrapping_add($x).wrapping_add($ac);
+    macro_rules! ff {
+        ($a:expr, $b:expr, $c:expr, $d:expr, $x:expr, $s:expr, $ac:expr) => {
+            $a = $a
+                .wrapping_add(($b & $c) | (!$b & $d))
+                .wrapping_add($x)
+                .wrapping_add($ac);
             $a = $b.wrapping_add($a.rotate_left($s));
-        }}
-        macro_rules! gg { ($a:expr, $b:expr, $c:expr, $d:expr, $x:expr, $s:expr, $ac:expr) => {
-            $a = $a.wrapping_add((($b & $d) | ($c & !$d))).wrapping_add($x).wrapping_add($ac);
+        };
+    }
+    macro_rules! gg {
+        ($a:expr, $b:expr, $c:expr, $d:expr, $x:expr, $s:expr, $ac:expr) => {
+            $a = $a
+                .wrapping_add(($b & $d) | ($c & !$d))
+                .wrapping_add($x)
+                .wrapping_add($ac);
             $a = $b.wrapping_add($a.rotate_left($s));
-        }}
-        macro_rules! hh { ($a:expr, $b:expr, $c:expr, $d:expr, $x:expr, $s:expr, $ac:expr) => {
-            $a = $a.wrapping_add($b ^ $c ^ $d).wrapping_add($x).wrapping_add($ac);
+        };
+    }
+    macro_rules! hh {
+        ($a:expr, $b:expr, $c:expr, $d:expr, $x:expr, $s:expr, $ac:expr) => {
+            $a = $a
+                .wrapping_add($b ^ $c ^ $d)
+                .wrapping_add($x)
+                .wrapping_add($ac);
             $a = $b.wrapping_add($a.rotate_left($s));
-        }}
-        macro_rules! ii { ($a:expr, $b:expr, $c:expr, $d:expr, $x:expr, $s:expr, $ac:expr) => {
-            $a = $a.wrapping_add($c ^ ($b | !$d)).wrapping_add($x).wrapping_add($ac);
+        };
+    }
+    macro_rules! ii {
+        ($a:expr, $b:expr, $c:expr, $d:expr, $x:expr, $s:expr, $ac:expr) => {
+            $a = $a
+                .wrapping_add($c ^ ($b | !$d))
+                .wrapping_add($x)
+                .wrapping_add($ac);
             $a = $b.wrapping_add($a.rotate_left($s));
-        }}
+        };
+    }
 
-        ff!(a, b, c, d, x[ 0], S11, 0xd76aa478);
-        ff!(d, a, b, c, x[ 1], S12, 0xe8c7b756);
-        ff!(c, d, a, b, x[ 2], S13, 0x242070db);
-        ff!(b, c, d, a, x[ 3], S14, 0xc1bdceee);
-        ff!(a, b, c, d, x[ 4], S11, 0xf57c0faf);
-        ff!(d, a, b, c, x[ 5], S12, 0x4787c62a);
-        ff!(c, d, a, b, x[ 6], S13, 0xa8304613);
-        ff!(b, c, d, a, x[ 7], S14, 0xfd469501);
-        ff!(a, b, c, d, x[ 8], S11, 0x698098d8);
-        ff!(d, a, b, c, x[ 9], S12, 0x8b44f7af);
-        ff!(c, d, a, b, x[10], S13, 0xffff5bb1);
-        ff!(b, c, d, a, x[11], S14, 0x895cd7be);
-        ff!(a, b, c, d, x[12], S11, 0x6b901122);
-        ff!(d, a, b, c, x[13], S12, 0xfd987193);
-        ff!(c, d, a, b, x[14], S13, 0xa679438e);
-        ff!(b, c, d, a, x[15], S14, 0x49b40821);
+    ff!(a, b, c, d, x[0], S11, 0xd76aa478);
+    ff!(d, a, b, c, x[1], S12, 0xe8c7b756);
+    ff!(c, d, a, b, x[2], S13, 0x242070db);
+    ff!(b, c, d, a, x[3], S14, 0xc1bdceee);
+    ff!(a, b, c, d, x[4], S11, 0xf57c0faf);
+    ff!(d, a, b, c, x[5], S12, 0x4787c62a);
+    ff!(c, d, a, b, x[6], S13, 0xa8304613);
+    ff!(b, c, d, a, x[7], S14, 0xfd469501);
+    ff!(a, b, c, d, x[8], S11, 0x698098d8);
+    ff!(d, a, b, c, x[9], S12, 0x8b44f7af);
+    ff!(c, d, a, b, x[10], S13, 0xffff5bb1);
+    ff!(b, c, d, a, x[11], S14, 0x895cd7be);
+    ff!(a, b, c, d, x[12], S11, 0x6b901122);
+    ff!(d, a, b, c, x[13], S12, 0xfd987193);
+    ff!(c, d, a, b, x[14], S13, 0xa679438e);
+    ff!(b, c, d, a, x[15], S14, 0x49b40821);
 
-        gg!(a, b, c, d, x[ 1], S21, 0xf61e2562);
-        gg!(d, a, b, c, x[ 6], S22, 0xc040b340);
-        gg!(c, d, a, b, x[11], S23, 0x265e5a51);
-        gg!(b, c, d, a, x[ 0], S24, 0xe9b6c7aa);
-        gg!(a, b, c, d, x[ 5], S21, 0xd62f105d);
-        gg!(d, a, b, c, x[10], S22, 0x02441453);
-        gg!(c, d, a, b, x[15], S23, 0xd8a1e681);
-        gg!(b, c, d, a, x[ 4], S24, 0xe7d3fbc8);
-        gg!(a, b, c, d, x[ 9], S21, 0x21e1cde6);
-        gg!(d, a, b, c, x[14], S22, 0xc33707d6);
-        gg!(c, d, a, b, x[ 3], S23, 0xf4d50d87);
-        gg!(b, c, d, a, x[ 8], S24, 0x455a14ed);
-        gg!(a, b, c, d, x[13], S21, 0xa9e3e905);
-        gg!(d, a, b, c, x[ 2], S22, 0xfcefa3f8);
-        gg!(c, d, a, b, x[ 7], S23, 0x676f02d9);
-        gg!(b, c, d, a, x[12], S24, 0x8d2a4c8a);
+    gg!(a, b, c, d, x[1], S21, 0xf61e2562);
+    gg!(d, a, b, c, x[6], S22, 0xc040b340);
+    gg!(c, d, a, b, x[11], S23, 0x265e5a51);
+    gg!(b, c, d, a, x[0], S24, 0xe9b6c7aa);
+    gg!(a, b, c, d, x[5], S21, 0xd62f105d);
+    gg!(d, a, b, c, x[10], S22, 0x02441453);
+    gg!(c, d, a, b, x[15], S23, 0xd8a1e681);
+    gg!(b, c, d, a, x[4], S24, 0xe7d3fbc8);
+    gg!(a, b, c, d, x[9], S21, 0x21e1cde6);
+    gg!(d, a, b, c, x[14], S22, 0xc33707d6);
+    gg!(c, d, a, b, x[3], S23, 0xf4d50d87);
+    gg!(b, c, d, a, x[8], S24, 0x455a14ed);
+    gg!(a, b, c, d, x[13], S21, 0xa9e3e905);
+    gg!(d, a, b, c, x[2], S22, 0xfcefa3f8);
+    gg!(c, d, a, b, x[7], S23, 0x676f02d9);
+    gg!(b, c, d, a, x[12], S24, 0x8d2a4c8a);
 
-        hh!(a, b, c, d, x[ 5], S31, 0xfffa3942);
-        hh!(d, a, b, c, x[ 8], S32, 0x8771f681);
-        hh!(c, d, a, b, x[11], S33, 0x6d9d6122);
-        hh!(b, c, d, a, x[14], S34, 0xfde5380c);
-        hh!(a, b, c, d, x[ 1], S31, 0xa4beea44);
-        hh!(d, a, b, c, x[ 4], S32, 0x4bdecfa9);
-        hh!(c, d, a, b, x[ 7], S33, 0xf6bb4b60);
-        hh!(b, c, d, a, x[10], S34, 0xbebfbc70);
-        hh!(a, b, c, d, x[13], S31, 0x289b7ec6);
-        hh!(d, a, b, c, x[ 0], S32, 0xeaa127fa);
-        hh!(c, d, a, b, x[ 3], S33, 0xd4ef3085);
-        hh!(b, c, d, a, x[ 6], S34, 0x04881d05);
-        hh!(a, b, c, d, x[ 9], S31, 0xd9d4d039);
-        hh!(d, a, b, c, x[12], S32, 0xe6db99e5);
-        hh!(c, d, a, b, x[15], S33, 0x1fa27cf8);
-        hh!(b, c, d, a, x[ 2], S34, 0xc4ac5665);
+    hh!(a, b, c, d, x[5], S31, 0xfffa3942);
+    hh!(d, a, b, c, x[8], S32, 0x8771f681);
+    hh!(c, d, a, b, x[11], S33, 0x6d9d6122);
+    hh!(b, c, d, a, x[14], S34, 0xfde5380c);
+    hh!(a, b, c, d, x[1], S31, 0xa4beea44);
+    hh!(d, a, b, c, x[4], S32, 0x4bdecfa9);
+    hh!(c, d, a, b, x[7], S33, 0xf6bb4b60);
+    hh!(b, c, d, a, x[10], S34, 0xbebfbc70);
+    hh!(a, b, c, d, x[13], S31, 0x289b7ec6);
+    hh!(d, a, b, c, x[0], S32, 0xeaa127fa);
+    hh!(c, d, a, b, x[3], S33, 0xd4ef3085);
+    hh!(b, c, d, a, x[6], S34, 0x04881d05);
+    hh!(a, b, c, d, x[9], S31, 0xd9d4d039);
+    hh!(d, a, b, c, x[12], S32, 0xe6db99e5);
+    hh!(c, d, a, b, x[15], S33, 0x1fa27cf8);
+    hh!(b, c, d, a, x[2], S34, 0xc4ac5665);
 
-        ii!(a, b, c, d, x[ 0], S41, 0xf4292244);
-        ii!(d, a, b, c, x[ 7], S42, 0x432aff97);
-        ii!(c, d, a, b, x[14], S43, 0xab9423a7);
-        ii!(b, c, d, a, x[ 5], S44, 0xfc93a039);
-        ii!(a, b, c, d, x[12], S41, 0x655b59c3);
-        ii!(d, a, b, c, x[ 3], S42, 0x8f0ccc92);
-        ii!(c, d, a, b, x[10], S43, 0xffeff47d);
-        ii!(b, c, d, a, x[ 1], S44, 0x85845dd1);
-        ii!(a, b, c, d, x[ 8], S41, 0x6fa87e4f);
-        ii!(d, a, b, c, x[15], S42, 0xfe2ce6e0);
-        ii!(c, d, a, b, x[ 6], S43, 0xa3014314);
-        ii!(b, c, d, a, x[13], S44, 0x4e0811a1);
-        ii!(a, b, c, d, x[ 4], S41, 0xf7537e82);
-        ii!(d, a, b, c, x[11], S42, 0xbd3af235);
-        ii!(c, d, a, b, x[ 2], S43, 0x2ad7d2bb);
-        ii!(b, c, d, a, x[ 9], S44, 0xeb86d391);
+    ii!(a, b, c, d, x[0], S41, 0xf4292244);
+    ii!(d, a, b, c, x[7], S42, 0x432aff97);
+    ii!(c, d, a, b, x[14], S43, 0xab9423a7);
+    ii!(b, c, d, a, x[5], S44, 0xfc93a039);
+    ii!(a, b, c, d, x[12], S41, 0x655b59c3);
+    ii!(d, a, b, c, x[3], S42, 0x8f0ccc92);
+    ii!(c, d, a, b, x[10], S43, 0xffeff47d);
+    ii!(b, c, d, a, x[1], S44, 0x85845dd1);
+    ii!(a, b, c, d, x[8], S41, 0x6fa87e4f);
+    ii!(d, a, b, c, x[15], S42, 0xfe2ce6e0);
+    ii!(c, d, a, b, x[6], S43, 0xa3014314);
+    ii!(b, c, d, a, x[13], S44, 0x4e0811a1);
+    ii!(a, b, c, d, x[4], S41, 0xf7537e82);
+    ii!(d, a, b, c, x[11], S42, 0xbd3af235);
+    ii!(c, d, a, b, x[2], S43, 0x2ad7d2bb);
+    ii!(b, c, d, a, x[9], S44, 0xeb86d391);
 
     state[0] = state[0].wrapping_add(a);
     state[1] = state[1].wrapping_add(b);
@@ -455,9 +524,18 @@ mod tests {
     #[test]
     fn test_read_ini() {
         let content = "[DEFAULT]\ntenancy=ocid1.tenancy.oc1..abc\nuser=ocid1.user.oc1..def\nregion=us-phoenix-1\nkey_file=/home/user/.oci/key.pem\n\n[OTHER]\ntenancy=ocid1.tenancy.oc1..xyz\n";
-        assert_eq!(read_ini(content, "DEFAULT", "tenancy").unwrap(), "ocid1.tenancy.oc1..abc");
-        assert_eq!(read_ini(content, "DEFAULT", "region").unwrap(), "us-phoenix-1");
-        assert_eq!(read_ini(content, "OTHER", "tenancy").unwrap(), "ocid1.tenancy.oc1..xyz");
+        assert_eq!(
+            read_ini(content, "DEFAULT", "tenancy").unwrap(),
+            "ocid1.tenancy.oc1..abc"
+        );
+        assert_eq!(
+            read_ini(content, "DEFAULT", "region").unwrap(),
+            "us-phoenix-1"
+        );
+        assert_eq!(
+            read_ini(content, "OTHER", "tenancy").unwrap(),
+            "ocid1.tenancy.oc1..xyz"
+        );
         assert!(read_ini(content, "OTHER", "user").is_none());
         assert!(read_ini(content, "MISSING", "tenancy").is_none());
     }

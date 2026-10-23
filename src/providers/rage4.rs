@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -20,10 +20,12 @@ impl DnsProvider for Rage4 {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("RAGE4_Key")
+        let key = env
+            .get("RAGE4_Key")
             .ok_or_else(|| Error::Config("RAGE4_Key required".into()))?
             .clone();
-        let secret = env.get("RAGE4_Secret")
+        let secret = env
+            .get("RAGE4_Secret")
             .ok_or_else(|| Error::Config("RAGE4_Secret required".into()))?
             .clone();
         let creds = format!("{key}:{secret}");
@@ -33,11 +35,16 @@ impl DnsProvider for Rage4 {
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
         let zone_id = self.resolve_zone(domain)?;
-        let url = format!("https://rage4.com/rapi/createrecord/?id={zone_id}&name={name}&content={value}&type=TXT&ttl=120");
+        let url = format!(
+            "https://rage4.com/rapi/createrecord/?id={zone_id}&name={name}&content={value}&type=TXT&ttl=120"
+        );
         let resp = http::get(&url, &[("Authorization", &self.basic_auth)])
             .map_err(|e| Error::Provider(format!("rage4 create: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("rage4 create: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "rage4 create: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -63,19 +70,21 @@ impl Rage4 {
             .map_err(|e| Error::Json(format!("rage4 parse: {e}")))?;
         if let Some(domains) = v.as_array() {
             for d in domains {
-                if let Some(dname) = d.get("domain").and_then(|n| n.as_str()) {
-                    if domain == dname || domain.ends_with(&format!(".{dname}")) {
-                        if let Some(id) = d.get("id").and_then(|i| i.as_str()) {
-                            return Ok(id.to_string());
-                        }
-                        if let Some(id_num) = d.get("id").and_then(|i| i.as_i64()) {
-                            return Ok(id_num.to_string());
-                        }
+                if let Some(dname) = d.get("domain").and_then(|n| n.as_str())
+                    && (domain == dname || domain.ends_with(&format!(".{dname}")))
+                {
+                    if let Some(id) = d.get("id").and_then(|i| i.as_str()) {
+                        return Ok(id.to_string());
+                    }
+                    if let Some(id_num) = d.get("id").and_then(|i| i.as_i64()) {
+                        return Ok(id_num.to_string());
                     }
                 }
             }
         }
-        Err(Error::Provider(format!("rage4 zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "rage4 zone not found for {domain}"
+        )))
     }
 
     fn find_record(&self, zone_id: &str, name: &str, value: &str) -> Option<String> {

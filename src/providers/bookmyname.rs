@@ -19,10 +19,14 @@ impl DnsProvider for Bookmyname {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("BOOKMYNAME_Username")
-            .ok_or_else(|| Error::Config("BOOKMYNAME_Username required".into()))?.clone();
-        let password = env.get("BOOKMYNAME_Password")
-            .ok_or_else(|| Error::Config("BOOKMYNAME_Password required".into()))?.clone();
+        let username = env
+            .get("BOOKMYNAME_Username")
+            .ok_or_else(|| Error::Config("BOOKMYNAME_Username required".into()))?
+            .clone();
+        let password = env
+            .get("BOOKMYNAME_Password")
+            .ok_or_else(|| Error::Config("BOOKMYNAME_Password required".into()))?
+            .clone();
         Ok(Box::new(Bookmyname { username, password }))
     }
 
@@ -34,7 +38,10 @@ impl DnsProvider for Bookmyname {
         let resp = http::get(&url, &[])
             .map_err(|e| Error::Provider(format!("bookmyname add TXT: {e}")))?;
         if !resp.body.starts_with("good: update done, cid ") {
-            return Err(Error::Provider(format!("bookmyname add TXT: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "bookmyname add TXT: {}",
+                resp.body
+            )));
         }
         Ok(())
     }

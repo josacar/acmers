@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::error::Error;
 use crate::http;
 use crate::json as j;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 const BASE_URL: &str = "https://api.beget.com/api";
@@ -22,10 +23,12 @@ impl DnsProvider for Beget {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("Beget_Username")
+        let username = env
+            .get("Beget_Username")
             .ok_or_else(|| Error::Config("Beget_Username required".into()))?
             .clone();
-        let password = env.get("Beget_Password")
+        let password = env
+            .get("Beget_Password")
             .ok_or_else(|| Error::Config("Beget_Password required".into()))?
             .clone();
         Ok(Box::new(Beget { username, password }))
@@ -83,9 +86,7 @@ impl DnsProvider for Beget {
         }
 
         if let Some(serde_json::Value::Array(arr)) = records.get_mut("TXT") {
-            arr.retain(|r| {
-                r.get("txtdata").and_then(|v| v.as_str()) != Some(value)
-            });
+            arr.retain(|r| r.get("txtdata").and_then(|v| v.as_str()) != Some(value));
         }
 
         let body = serde_json::json!({
@@ -101,17 +102,18 @@ impl Beget {
     fn api_call(&self, endpoint: &str, input_data: &str) -> Result<serde_json::Value, Error> {
         let url = format!(
             "{BASE_URL}/{endpoint}?login={}&passwd={}&input_format=json&output_format=json&input_data={}",
-            url_encode(&self.username),
-            url_encode(&self.password),
-            url_encode(input_data),
+            helpers::url_encode_form(&self.username),
+            helpers::url_encode_form(&self.password),
+            helpers::url_encode_form(input_data),
         );
-        let resp = http::get(&url, &[])
-            .map_err(|e| Error::Provider(format!("beget API: {e}")))?;
+        let resp = http::get(&url, &[]).map_err(|e| Error::Provider(format!("beget API: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("beget HTTP {}: {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "beget HTTP {}: {}",
+                resp.status, resp.body
+            )));
         }
-        serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Provider(format!("beget JSON: {e}")))
+        serde_json::from_str(&resp.body).map_err(|e| Error::Provider(format!("beget JSON: {e}")))
     }
 
     fn check_ok(&self, resp: &serde_json::Value) -> ProviderResult {
@@ -137,7 +139,9 @@ impl Beget {
             for d in domains {
                 let fqdn = j::get_string(d, &["fqdn"]).unwrap_or("");
                 if fqdn == candidate {
-                    let id = d.get("id").and_then(|v| v.as_u64())
+                    let id = d
+                        .get("id")
+                        .and_then(|v| v.as_u64())
                         .ok_or_else(|| Error::Provider("beget: missing domain id".into()))?;
                     let sub_domain = if i > 0 {
                         parts[..i].join(".")
@@ -148,7 +152,9 @@ impl Beget {
                 }
             }
         }
-        Err(Error::Provider(format!("beget: cannot find zone for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "beget: cannot find zone for {fulldomain}"
+        )))
     }
 
     fn prepare_subdomain(&self, fulldomain: &str) -> ProviderResult {
@@ -180,24 +186,4 @@ impl Beget {
 
         Ok(())
     }
-}
-
-fn url_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            b' ' => out.push('+'),
-            _ => {
-                out.push('%');
-                out.push(hex_char((b >> 4) & 0xf));
-                out.push(hex_char(b & 0xf));
-            }
-        }
-    }
-    out
-}
-
-fn hex_char(n: u8) -> char {
-    if n < 10 { (b'0' + n) as char } else { (b'a' + n - 10) as char }
 }

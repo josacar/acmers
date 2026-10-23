@@ -21,10 +21,12 @@ impl DnsProvider for Euserv {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("EUSERV_Username")
+        let username = env
+            .get("EUSERV_Username")
             .ok_or_else(|| Error::Config("EUSERV_Username required".into()))?
             .clone();
-        let password = env.get("EUSERV_Password")
+        let password = env
+            .get("EUSERV_Password")
             .ok_or_else(|| Error::Config("EUSERV_Password required".into()))?
             .clone();
         Ok(Box::new(Euserv { username, password }))
@@ -51,7 +53,10 @@ impl DnsProvider for Euserv {
         let resp = http::post(BASE_URL, xml.as_bytes(), "text/xml", &[])
             .map_err(|e| Error::Provider(format!("euserv dns_create_record: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("euserv dns_create_record: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "euserv dns_create_record: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         check_status(&resp.body, "dns_create_record")?;
         Ok(())
@@ -78,7 +83,7 @@ impl DnsProvider for Euserv {
         if resp.status >= 400 {
             return Ok(());
         }
-        if !check_status(&resp.body, "dns_get_active_records").is_ok() {
+        if check_status(&resp.body, "dns_get_active_records").is_err() {
             return Ok(());
         }
         let record_id = match find_record_id_by_value(&resp.body, value) {
@@ -115,19 +120,25 @@ impl Euserv {
         let resp = http::post(BASE_URL, xml.as_bytes(), "text/xml", &[])
             .map_err(|e| Error::Provider(format!("euserv get_domain_orders: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("euserv get_domain_orders: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "euserv get_domain_orders: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         check_status(&resp.body, "get_domain_orders")?;
         let parts: Vec<&str> = domain.split('.').collect();
         for i in 0..parts.len().saturating_sub(1) {
             let candidate = parts[i..].join(".");
             if resp.body.contains(&format!(">{candidate}<")) {
-                let domain_id = extract_domain_id(&resp.body, &candidate)
-                    .ok_or_else(|| Error::Provider(format!("euserv: could not find domain_id for {candidate}")))?;
+                let domain_id = extract_domain_id(&resp.body, &candidate).ok_or_else(|| {
+                    Error::Provider(format!("euserv: could not find domain_id for {candidate}"))
+                })?;
                 return Ok((domain_id, candidate));
             }
         }
-        Err(Error::Provider(format!("euserv: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "euserv: zone not found for {domain}"
+        )))
     }
 }
 
@@ -152,7 +163,7 @@ fn check_status(xml: &str, context: &str) -> Result<(), Error> {
 }
 
 fn extract_domain_id(xml: &str, domain: &str) -> Option<String> {
-    let needle = format!(">domain_name<");
+    let needle = ">domain_name<".to_string();
     let mut pos = 0;
     while let Some(idx) = xml[pos..].find(&needle) {
         let abs_idx = pos + idx;
@@ -175,7 +186,7 @@ fn extract_domain_id(xml: &str, domain: &str) -> Option<String> {
 }
 
 fn find_record_id_by_value(xml: &str, value: &str) -> Option<String> {
-    let needle = format!(">dns_record_content<");
+    let needle = ">dns_record_content<".to_string();
     let mut pos = 0;
     while let Some(idx) = xml[pos..].find(&needle) {
         let abs_idx = pos + idx;

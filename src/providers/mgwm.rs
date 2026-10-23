@@ -22,10 +22,12 @@ impl DnsProvider for Mgwm {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let customer = env.get("MGWM_CUSTOMER")
+        let customer = env
+            .get("MGWM_CUSTOMER")
             .ok_or_else(|| Error::Config("MGWM_CUSTOMER required".into()))?
             .clone();
-        let api_hash = env.get("MGWM_API_HASH")
+        let api_hash = env
+            .get("MGWM_API_HASH")
             .ok_or_else(|| Error::Config("MGWM_API_HASH required".into()))?
             .clone();
         Ok(Box::new(Mgwm { customer, api_hash }))
@@ -37,10 +39,16 @@ impl DnsProvider for Mgwm {
         let resp = http::get(&url, &[("Authorization", &auth)])
             .map_err(|e| Error::Provider(format!("mgwm add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("mgwm add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "mgwm add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         if resp.body.trim() != "OK" {
-            return Err(Error::Provider(format!("mgwm add TXT: unexpected response: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "mgwm add TXT: unexpected response: {}",
+                resp.body
+            )));
         }
         Ok(())
     }

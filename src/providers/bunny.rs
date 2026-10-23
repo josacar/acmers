@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,8 +19,10 @@ impl DnsProvider for Bunny {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("BUNNY_API_KEY")
-            .ok_or_else(|| Error::Config("BUNNY_API_KEY required".into()))?.clone();
+        let api_key = env
+            .get("BUNNY_API_KEY")
+            .ok_or_else(|| Error::Config("BUNNY_API_KEY required".into()))?
+            .clone();
         Ok(Box::new(Bunny { api_key }))
     }
 
@@ -34,8 +36,13 @@ impl DnsProvider for Bunny {
             "Value": value,
             "TtlSeconds": 120,
         });
-        http::put(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("AccessKey", &self.api_key)])
-            .map_err(|e| Error::Provider(format!("bunny add TXT: {e}")))?;
+        http::put(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("AccessKey", &self.api_key)],
+        )
+        .map_err(|e| Error::Provider(format!("bunny add TXT: {e}")))?;
         Ok(())
     }
 
@@ -53,18 +60,20 @@ impl DnsProvider for Bunny {
 
 impl Bunny {
     fn resolve_zone(&self, domain: &str) -> Result<i64, Error> {
-        let resp = http::get("https://api.bunny.net/dnszone", &[("AccessKey", &self.api_key)])
-            .map_err(|e| Error::Provider(format!("bunny list zones: {e}")))?;
+        let resp = http::get(
+            "https://api.bunny.net/dnszone",
+            &[("AccessKey", &self.api_key)],
+        )
+        .map_err(|e| Error::Provider(format!("bunny list zones: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("bunny zones: {e}")))?;
         if let Some(items) = v.get("Items").and_then(|i| i.as_array()) {
             for item in items {
-                if let Some(nm) = item.get("Domain").and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        if let Some(id) = item.get("Id").and_then(|i| i.as_i64()) {
-                            return Ok(id);
-                        }
-                    }
+                if let Some(nm) = item.get("Domain").and_then(|n| n.as_str())
+                    && (domain == nm || domain.ends_with(&format!(".{nm}")))
+                    && let Some(id) = item.get("Id").and_then(|i| i.as_i64())
+                {
+                    return Ok(id);
                 }
             }
         }
@@ -82,10 +91,9 @@ impl Bunny {
                 if r.get("Name").and_then(|n| n.as_str()) == Some(name)
                     && r.get("Value").and_then(|n| n.as_str()) == Some(value)
                     && r.get("Type").and_then(|t| t.as_i64()) == Some(2)
+                    && let Some(id) = r.get("Id").and_then(|i| i.as_i64())
                 {
-                    if let Some(id) = r.get("Id").and_then(|i| i.as_i64()) {
-                        return Ok(Some(id));
-                    }
+                    return Ok(Some(id));
                 }
             }
         }

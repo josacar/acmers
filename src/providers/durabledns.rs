@@ -21,10 +21,12 @@ impl DnsProvider for Durabledns {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let user = env.get("DD_API_User")
+        let user = env
+            .get("DD_API_User")
             .ok_or_else(|| Error::Config("DD_API_User required".into()))?
             .clone();
-        let key = env.get("DD_API_Key")
+        let key = env
+            .get("DD_API_Key")
             .ok_or_else(|| Error::Config("DD_API_Key required".into()))?
             .clone();
         Ok(Box::new(Durabledns { user, key }))
@@ -33,15 +35,18 @@ impl DnsProvider for Durabledns {
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
         let (sub_domain, zone) = self.get_root(name)?;
         let zonename = format!("{zone}.");
-        let body = self.build_soap_xml("createRecord", &[
-            ("string", "zonename", &zonename),
-            ("string", "name", &sub_domain),
-            ("string", "type", "TXT"),
-            ("string", "data", value),
-            ("int", "aux", "0"),
-            ("int", "ttl", "10"),
-            ("string", "ddns_enabled", "N"),
-        ]);
+        let body = self.build_soap_xml(
+            "createRecord",
+            &[
+                ("string", "zonename", &zonename),
+                ("string", "name", &sub_domain),
+                ("string", "type", "TXT"),
+                ("string", "data", value),
+                ("int", "aux", "0"),
+                ("int", "ttl", "10"),
+                ("string", "ddns_enabled", "N"),
+            ],
+        );
         let resp = self.soap_request("createRecord", &body)?;
         if !resp.contains("createRecordResponse") {
             return Err(Error::Provider(format!("durabledns create failed: {resp}")));
@@ -53,21 +58,23 @@ impl DnsProvider for Durabledns {
         let (_sub_domain, zone) = self.get_root(name)?;
         let zonename = format!("{zone}.");
 
-        let body = self.build_soap_xml("listRecords", &[
-            ("string", "zonename", &zonename),
-        ]);
+        let body = self.build_soap_xml("listRecords", &[("string", "zonename", &zonename)]);
         let resp = self.soap_request("listRecords", &body)?;
 
-        let subtxt = if value.len() > 30 { &value[..30] } else { value };
+        let subtxt = if value.len() > 30 {
+            &value[..30]
+        } else {
+            value
+        };
         let record_id = match Self::extract_record_id(&resp, subtxt) {
             Some(id) => id,
             None => return Ok(()),
         };
 
-        let body = self.build_soap_xml("deleteRecord", &[
-            ("string", "zonename", &zonename),
-            ("int", "id", &record_id),
-        ]);
+        let body = self.build_soap_xml(
+            "deleteRecord",
+            &[("string", "zonename", &zonename), ("int", "id", &record_id)],
+        );
         let resp = self.soap_request("deleteRecord", &body)?;
         if !resp.contains("Success") && !resp.contains("deleteRecordResponse") {
             eprintln!("warning: durabledns delete may have failed: {resp}");
@@ -81,11 +88,18 @@ impl Durabledns {
         let url = format!("{BASE_URL}/{method}.php");
         let urn = format!("{method}wsdl");
         let action = format!("\"urn:{urn}#{method}\"");
-        let resp = http::post(&url, xml.as_bytes(), "text/xml; charset=utf-8", &[
-            ("SOAPAction", &action),
-        ]).map_err(|e| Error::Provider(format!("durabledns {method}: {e}")))?;
+        let resp = http::post(
+            &url,
+            xml.as_bytes(),
+            "text/xml; charset=utf-8",
+            &[("SOAPAction", &action)],
+        )
+        .map_err(|e| Error::Provider(format!("durabledns {method}: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("durabledns {method}: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "durabledns {method}: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(resp.body)
     }
@@ -136,18 +150,20 @@ impl Durabledns {
                 return Ok((sub_domain, h));
             }
         }
-        Err(Error::Provider(format!("durabledns zone not found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "durabledns zone not found for {fulldomain}"
+        )))
     }
 
     fn extract_record_id(response: &str, subtxt: &str) -> Option<String> {
         let items: Vec<&str> = response.split("<item").collect();
         for item in items {
-            if item.contains(subtxt) {
-                if let Some(start) = item.find("<id xsi:type=\"xsd:int\">") {
-                    let after = &item[start + "<id xsi:type=\"xsd:int\">".len()..];
-                    if let Some(end) = after.find("</id>") {
-                        return Some(after[..end].to_string());
-                    }
+            if item.contains(subtxt)
+                && let Some(start) = item.find("<id xsi:type=\"xsd:int\">")
+            {
+                let after = &item[start + "<id xsi:type=\"xsd:int\">".len()..];
+                if let Some(end) = after.find("</id>") {
+                    return Some(after[..end].to_string());
                 }
             }
         }

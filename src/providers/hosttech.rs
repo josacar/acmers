@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for Hosttech {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("HOSTTECH_API_KEY")
+        let token = env
+            .get("HOSTTECH_API_KEY")
             .ok_or_else(|| Error::Config("HOSTTECH_API_KEY required".into()))?
             .clone();
         Ok(Box::new(Hosttech { token }))
@@ -33,12 +34,16 @@ impl DnsProvider for Hosttech {
             "type": "TXT",
             "content": value,
             "ttl": 120,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.nine.ch/dns/v1/zones/{zone_id}/records");
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("hosttech add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("hosttech add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "hosttech add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -63,14 +68,18 @@ impl DnsProvider for Hosttech {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("content").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.nine.ch/dns/v1/zones/{zone_id}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url =
+                        format!("https://api.nine.ch/dns/v1/zones/{zone_id}/records/{id}");
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }
@@ -86,14 +95,17 @@ impl Hosttech {
             .map_err(|e| Error::Json(format!("hosttech zones: {e}")))?;
         if let Some(zones) = v.as_array() {
             for zone in zones {
-                if let Some(nm) = zone.get("name").and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        if let Some(id) = zone.get("id").and_then(|i| {
-                            if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                        }) {
-                            return Ok(id);
+                if let Some(nm) = zone.get("name").and_then(|n| n.as_str())
+                    && (domain == nm || domain.ends_with(&format!(".{nm}")))
+                    && let Some(id) = zone.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
                         }
-                    }
+                    })
+                {
+                    return Ok(id);
                 }
             }
         }

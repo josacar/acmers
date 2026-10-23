@@ -144,6 +144,27 @@ if v.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
 }
 ```
 
+### Shared helpers
+
+Use `crate::providers::helpers` for common provider operations:
+
+```rust
+use crate::providers::helpers;
+
+// URL encoding
+let encoded = helpers::url_encode(value);        // space -> %20
+let form_encoded = helpers::url_encode_form(value); // space -> +
+
+// TXT record content quoting
+let quoted = helpers::txt_value(value);
+
+// Common REST record CRUD
+let zone_id = helpers::find_zone_by_domain(base_url, domain, &headers)?;
+let record = helpers::find_record(list_url, &zone_id, "TXT", name, &headers)?;
+let id = helpers::create_record(create_url, &zone_id, "TXT", name, &quoted, 120, &headers)?;
+helpers::delete_record(delete_url, &zone_id, &id, &headers)?;
+```
+
 ### Error types
 
 ```rust

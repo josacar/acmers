@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for Zilore {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("Zilore_Key")
+        let api_key = env
+            .get("Zilore_Key")
             .ok_or_else(|| Error::Config("Zilore_Key required".into()))?
             .clone();
         Ok(Box::new(Zilore { api_key }))
@@ -34,7 +35,10 @@ impl DnsProvider for Zilore {
         let resp = http::post(&url, b"", "application/json", headers)
             .map_err(|e| Error::Provider(format!("zilore add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("zilore add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "zilore add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -56,23 +60,28 @@ impl DnsProvider for Zilore {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records = v.get("response").and_then(|d| d.as_array())
+        let records = v
+            .get("response")
+            .and_then(|d| d.as_array())
             .or_else(|| v.as_array());
         if let Some(arr) = records {
             for r in arr {
                 if r.get("record_type").and_then(|t| t.as_str()) == Some("TXT")
                     && r.get("record_name").and_then(|n| n.as_str()) == Some(name)
                     && r.get("record_value").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = r.get("record_id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = r.get("record_id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!(
-                            "https://api.zilore.com/dns/v1/domains/{zone}/records?record_id={id}"
-                        );
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url = format!(
+                        "https://api.zilore.com/dns/v1/domains/{zone}/records?record_id={id}"
+                    );
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }

@@ -18,8 +18,10 @@ impl DnsProvider for Leaseweb {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("LSW_Key")
-            .ok_or_else(|| Error::Config("LSW_Key required".into()))?.clone();
+        let api_key = env
+            .get("LSW_Key")
+            .ok_or_else(|| Error::Config("LSW_Key required".into()))?
+            .clone();
         Ok(Box::new(Leaseweb { api_key }))
     }
 
@@ -31,12 +33,19 @@ impl DnsProvider for Leaseweb {
             "type": "TXT",
             "content": [value],
             "ttl": 60,
-        })).unwrap();
-        let url = format!("https://api.leaseweb.com/hosting/v2/domains/{}/resourceRecordSets", zone);
+        }))
+        .unwrap();
+        let url = format!(
+            "https://api.leaseweb.com/hosting/v2/domains/{}/resourceRecordSets",
+            zone
+        );
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("Leaseweb add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Leaseweb add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Leaseweb add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -47,7 +56,10 @@ impl DnsProvider for Leaseweb {
             Ok(z) => z,
             Err(_) => return Ok(()),
         };
-        let url = format!("https://api.leaseweb.com/hosting/v2/domains/{}/resourceRecordSets/{}/TXT", zone, name);
+        let url = format!(
+            "https://api.leaseweb.com/hosting/v2/domains/{}/resourceRecordSets/{}/TXT",
+            zone, name
+        );
         let _ = http::delete(&url, headers);
         Ok(())
     }
@@ -62,10 +74,10 @@ impl Leaseweb {
         for i in (1..parts.len() - 1).rev() {
             let candidate = parts[i..].join(".");
             let url = format!("https://api.leaseweb.com/hosting/v2/domains/{}", candidate);
-            if let Ok(resp) = http::get(&url, headers) {
-                if resp.status == 200 {
-                    return Ok(candidate);
-                }
+            if let Ok(resp) = http::get(&url, headers)
+                && resp.status == 200
+            {
+                return Ok(candidate);
             }
         }
         Err(Error::Provider(format!("zone not found for {domain}")))

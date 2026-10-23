@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for Namesilo {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("Namesilo_Key")
+        let api_key = env
+            .get("Namesilo_Key")
             .ok_or_else(|| Error::Config("Namesilo_Key required".into()))?
             .clone();
         Ok(Box::new(Namesilo { api_key }))
@@ -33,12 +34,18 @@ impl DnsProvider for Namesilo {
             urlencode(name),
             urlencode(value),
         );
-        let resp = http::get(&url, &[])
-            .map_err(|e| Error::Provider(format!("Namesilo add TXT: {e}")))?;
+        let resp =
+            http::get(&url, &[]).map_err(|e| Error::Provider(format!("Namesilo add TXT: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Namesilo response: {e}")))?;
-        if v.get("reply").and_then(|r| r.get("code").and_then(|c| c.as_i64())) != Some(300) {
-            let detail = v.get("reply").and_then(|r| r.get("detail").and_then(|d| d.as_str())).unwrap_or("unknown");
+        if v.get("reply")
+            .and_then(|r| r.get("code").and_then(|c| c.as_i64()))
+            != Some(300)
+        {
+            let detail = v
+                .get("reply")
+                .and_then(|r| r.get("detail").and_then(|d| d.as_str()))
+                .unwrap_or("unknown");
             return Err(Error::Provider(format!("Namesilo add TXT: {detail}")));
         }
         Ok(())
@@ -75,8 +82,16 @@ impl Namesilo {
                 && record.get("host").and_then(|h| h.as_str()) == Some(name)
                 && record.get("value").and_then(|v| v.as_str()) == Some(value)
             {
-                return record.get("record_id").and_then(|r| r.as_str()).map(|s| s.to_string())
-                    .or_else(|| record.get("record_id").and_then(|r| r.as_i64()).map(|i| i.to_string()));
+                return record
+                    .get("record_id")
+                    .and_then(|r| r.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        record
+                            .get("record_id")
+                            .and_then(|r| r.as_i64())
+                            .map(|i| i.to_string())
+                    });
             }
         }
         None
@@ -87,7 +102,9 @@ fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }

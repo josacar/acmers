@@ -21,10 +21,12 @@ impl DnsProvider for Schlundtech {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let user = env.get("SCHLUNDTECH_USER")
+        let user = env
+            .get("SCHLUNDTECH_USER")
             .ok_or_else(|| Error::Config("SCHLUNDTECH_USER required".into()))?
             .clone();
-        let password = env.get("SCHLUNDTECH_PASSWORD")
+        let password = env
+            .get("SCHLUNDTECH_PASSWORD")
             .ok_or_else(|| Error::Config("SCHLUNDTECH_PASSWORD required".into()))?
             .clone();
         Ok(Box::new(Schlundtech { user, password }))
@@ -82,7 +84,14 @@ impl Schlundtech {
         )
     }
 
-    fn build_zone_update_xml(&self, zone: &str, subdomain: &str, txtvalue: &str, system_ns: &str, add: bool) -> String {
+    fn build_zone_update_xml(
+        &self,
+        zone: &str,
+        subdomain: &str,
+        txtvalue: &str,
+        system_ns: &str,
+        add: bool,
+    ) -> String {
         let tag = if add { "rr_add" } else { "rr_rem" };
         format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -117,7 +126,10 @@ impl Schlundtech {
         let resp = http::post(SCHLUNDTECH_API, xml_body.as_bytes(), "application/xml", &[])
             .map_err(|e| Error::Provider(format!("schlundtech api call: {e}")))?;
         if !resp.body.contains("<type>success</type>") {
-            return Err(Error::Provider(format!("schlundtech api error: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "schlundtech api error: {}",
+                resp.body
+            )));
         }
         Ok(resp.body)
     }
@@ -135,18 +147,29 @@ impl Schlundtech {
                 Err(_) => continue,
             };
             if response.contains("<summary>1</summary>") {
-                let zone = xml_find_text(&response, "name")
-                    .ok_or_else(|| Error::Provider("schlundtech: no zone name in response".into()))?;
-                let system_ns = xml_find_text(&response, "system_ns")
-                    .ok_or_else(|| Error::Provider("schlundtech: no system_ns in response".into()))?;
+                let zone = xml_find_text(&response, "name").ok_or_else(|| {
+                    Error::Provider("schlundtech: no zone name in response".into())
+                })?;
+                let system_ns = xml_find_text(&response, "system_ns").ok_or_else(|| {
+                    Error::Provider("schlundtech: no system_ns in response".into())
+                })?;
                 let sub_domain = parts[..i].join(".");
                 return Ok((zone, sub_domain, system_ns));
             }
         }
-        Err(Error::Provider(format!("schlundtech: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "schlundtech: zone not found for {domain}"
+        )))
     }
 
-    fn zone_update(&self, zone: &str, subdomain: &str, txtvalue: &str, system_ns: &str, add: bool) -> Result<(), Error> {
+    fn zone_update(
+        &self,
+        zone: &str,
+        subdomain: &str,
+        txtvalue: &str,
+        system_ns: &str,
+        add: bool,
+    ) -> Result<(), Error> {
         let xml = self.build_zone_update_xml(zone, subdomain, txtvalue, system_ns, add);
         self.api_call(&xml)?;
         Ok(())

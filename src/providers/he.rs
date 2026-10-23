@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct He {
@@ -20,10 +21,12 @@ impl DnsProvider for He {
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
         Ok(Box::new(He {
-            username: env.get("HE_Username")
+            username: env
+                .get("HE_Username")
                 .ok_or_else(|| Error::Config("HE_Username required".into()))?
                 .clone(),
-            password: env.get("HE_Password")
+            password: env
+                .get("HE_Password")
                 .ok_or_else(|| Error::Config("HE_Password required".into()))?
                 .clone(),
         }))
@@ -34,11 +37,11 @@ impl DnsProvider for He {
 
         let form = format!(
             "email={}&pass={}&account=&menu=edit_zone&Type=TXT&hosted_dns_zoneid={}&hosted_dns_recordid=&hosted_dns_editzone=1&Priority=&Name={}&Content={}&TTL=300&hosted_dns_editrecord=Submit",
-            url_encode_f(&self.username),
-            url_encode_f(&self.password),
-            url_encode_f(&zone_id),
-            url_encode_f(name),
-            url_encode_f(value),
+            helpers::url_encode_form(&self.username),
+            helpers::url_encode_form(&self.password),
+            helpers::url_encode_form(&zone_id),
+            helpers::url_encode_form(name),
+            helpers::url_encode_form(value),
         );
         let resp = http::post(
             "https://dns.he.net/",
@@ -61,9 +64,9 @@ impl DnsProvider for He {
 
         let form = format!(
             "email={}&pass={}&hosted_dns_zoneid={}&menu=edit_zone&hosted_dns_editzone=",
-            url_encode_f(&self.username),
-            url_encode_f(&self.password),
-            url_encode_f(&zone_id),
+            helpers::url_encode_form(&self.username),
+            helpers::url_encode_form(&self.password),
+            helpers::url_encode_form(&zone_id),
         );
         let resp = match http::post(
             "https://dns.he.net/",
@@ -82,10 +85,10 @@ impl DnsProvider for He {
 
         let del_form = format!(
             "email={}&pass={}&menu=edit_zone&hosted_dns_zoneid={}&hosted_dns_recordid={}&hosted_dns_editzone=1&hosted_dns_delrecord=1&hosted_dns_delconfirm=delete",
-            url_encode_f(&self.username),
-            url_encode_f(&self.password),
-            url_encode_f(&zone_id),
-            url_encode_f(&record_id),
+            helpers::url_encode_form(&self.username),
+            helpers::url_encode_form(&self.password),
+            helpers::url_encode_form(&zone_id),
+            helpers::url_encode_form(&record_id),
         );
         let _ = http::post(
             "https://dns.he.net/",
@@ -101,8 +104,8 @@ impl He {
     fn find_zone(&self, domain: &str) -> Result<String, Error> {
         let body = format!(
             "email={}&pass={}",
-            url_encode_f(&self.username),
-            url_encode_f(&self.password),
+            helpers::url_encode_form(&self.username),
+            helpers::url_encode_form(&self.password),
         );
         let resp = http::post(
             "https://dns.he.net/",
@@ -144,7 +147,9 @@ fn parse_zones(html: &str) -> Vec<(String, String)> {
     };
 
     let table_section = &html[table_start..];
-    let table_end = table_section.find("</table>").unwrap_or(table_section.len());
+    let table_end = table_section
+        .find("</table>")
+        .unwrap_or(table_section.len());
     let table_html = &table_section[..table_end];
 
     let rows: Vec<&str> = table_html.split("<tr").collect();
@@ -218,28 +223,4 @@ fn find_record_id(html: &str, full_domain: &str, txt_value: &str) -> Option<Stri
         }
     }
     None
-}
-
-fn url_encode_f(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            b' ' => out.push('+'),
-            _ => {
-                out.push('%');
-                out.push(hex_f((b >> 4) & 0xf));
-                out.push(hex_f(b & 0xf));
-            }
-        }
-    }
-    out
-}
-
-fn hex_f(n: u8) -> char {
-    if n < 10 {
-        (b'0' + n) as char
-    } else {
-        (b'A' + n - 10) as char
-    }
 }

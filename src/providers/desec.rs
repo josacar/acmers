@@ -1,8 +1,9 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Desec {
@@ -19,8 +20,10 @@ impl DnsProvider for Desec {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("DESEC_Token")
-            .ok_or_else(|| Error::Config("DESEC_Token required".into()))?.clone();
+        let token = env
+            .get("DESEC_Token")
+            .ok_or_else(|| Error::Config("DESEC_Token required".into()))?
+            .clone();
         Ok(Box::new(Desec { token }))
     }
 
@@ -31,13 +34,21 @@ impl DnsProvider for Desec {
             "subname": name,
             "type": "TXT",
             "ttl": 120,
-            "records": [format!("\"{value}\"")],
+            "records": [helpers::txt_value(value)],
         });
         let auth = format!("Token {}", self.token);
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("desec add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("desec add TXT: {e}")))?;
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("desec add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "desec add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -47,8 +58,13 @@ impl DnsProvider for Desec {
         let url = format!("https://desec.io/api/v1/domains/{domain}/rrsets/{name}/TXT/");
         let body = serde_json::json!({"records": []});
         let auth = format!("Token {}", self.token);
-        http::patch(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("desec delete TXT: {e}")))?;
+        http::patch(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("desec delete TXT: {e}")))?;
         Ok(())
     }
 }
@@ -56,16 +72,19 @@ impl DnsProvider for Desec {
 impl Desec {
     fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
         let auth = format!("Token {}", self.token);
-        let resp = http::get("https://desec.io/api/v1/domains/", &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("desec list domains: {e}")))?;
+        let resp = http::get(
+            "https://desec.io/api/v1/domains/",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("desec list domains: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("desec domains: {e}")))?;
         if let Some(arr) = v.as_array() {
             for d in arr {
-                if let Some(nm) = d.get("name").and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        return Ok(nm.to_string());
-                    }
+                if let Some(nm) = d.get("name").and_then(|n| n.as_str())
+                    && (domain == nm || domain.ends_with(&format!(".{nm}")))
+                {
+                    return Ok(nm.to_string());
                 }
             }
         }

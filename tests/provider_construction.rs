@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::sync::Arc;
 use std::thread;
 
 use acmers::providers;
@@ -33,19 +32,31 @@ impl FastMock {
                     Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
                     Err(_) => break,
                 }
-                if rx.try_recv().is_ok() { break; }
+                if rx.try_recv().is_ok() {
+                    break;
+                }
                 thread::sleep(std::time::Duration::from_millis(1));
             }
         });
-        FastMock { port, handle: Some(h), stop: Some(tx) }
+        FastMock {
+            port,
+            handle: Some(h),
+            stop: Some(tx),
+        }
     }
-    fn url(&self) -> String { format!("http://127.0.0.1:{}", self.port) }
+    fn url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
 }
 
 impl Drop for FastMock {
     fn drop(&mut self) {
-        if let Some(tx) = self.stop.take() { let _ = tx.send(()); }
-        if let Some(h) = self.handle.take() { let _ = h.join(); }
+        if let Some(tx) = self.stop.take() {
+            let _ = tx.send(());
+        }
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
     }
 }
 
@@ -60,14 +71,22 @@ fn test_all_providers_have_unique_slugs() {
 #[test]
 fn test_all_providers_have_env_vars() {
     for meta in providers::list() {
-        assert!(!meta.env_vars.is_empty(), "provider '{}' has no env vars defined", meta.slug);
+        assert!(
+            !meta.env_vars.is_empty(),
+            "provider '{}' has no env vars defined",
+            meta.slug
+        );
     }
 }
 
 #[test]
 fn test_all_providers_have_names() {
     for meta in providers::list() {
-        assert!(!meta.name.is_empty(), "provider '{}' has empty name", meta.slug);
+        assert!(
+            !meta.name.is_empty(),
+            "provider '{}' has empty name",
+            meta.slug
+        );
         assert!(!meta.slug.is_empty(), "provider has empty slug");
     }
 }
@@ -97,7 +116,12 @@ fn test_all_providers_construct_without_panicking() {
             Err(_) => errors += 1,
         }
         if (i + 1) % 50 == 0 {
-            println!("  progress: {}/{total} ({} ok, {} err)", i + 1, constructed, errors);
+            println!(
+                "  progress: {}/{total} ({} ok, {} err)",
+                i + 1,
+                constructed,
+                errors
+            );
         }
     }
     println!("constructed: {constructed}/{total}, errors: {errors}");

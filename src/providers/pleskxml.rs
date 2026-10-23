@@ -20,13 +20,16 @@ impl DnsProvider for Pleskxml {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let user = env.get("pleskxml_user")
+        let user = env
+            .get("pleskxml_user")
             .ok_or_else(|| Error::Config("pleskxml_user required".into()))?
             .clone();
-        let pass = env.get("pleskxml_pass")
+        let pass = env
+            .get("pleskxml_pass")
             .ok_or_else(|| Error::Config("pleskxml_pass required".into()))?
             .clone();
-        let uri = env.get("pleskxml_uri")
+        let uri = env
+            .get("pleskxml_uri")
             .ok_or_else(|| Error::Config("pleskxml_uri required".into()))?
             .clone();
         Ok(Box::new(Pleskxml { user, pass, uri }))
@@ -72,11 +75,16 @@ fn extract_record_name(name: &str, domain: &str) -> String {
 
 impl Pleskxml {
     fn plesk_request(&self, xml_body: &str) -> Result<http::Response, Error> {
-        http::post(&self.uri, xml_body.as_bytes(), "text/xml", &[
-            ("HTTP_AUTH_LOGIN", &self.user),
-            ("HTTP_AUTH_PASSWD", &self.pass),
-            ("HTTP_PRETTY_PRINT", "true"),
-        ])
+        http::post(
+            &self.uri,
+            xml_body.as_bytes(),
+            "text/xml",
+            &[
+                ("HTTP_AUTH_LOGIN", &self.user),
+                ("HTTP_AUTH_PASSWD", &self.pass),
+                ("HTTP_PRETTY_PRINT", "true"),
+            ],
+        )
         .map_err(|e| Error::Provider(format!("pleskxml request: {e}")))
     }
 
@@ -98,12 +106,11 @@ impl Pleskxml {
 </packet>"#,
             d = escaped
         );
-        if let Ok(resp) = self.plesk_request(&xml) {
-            if resp.status < 400 {
-                if let Some(id) = plesk_find_int(&resp.body, "id") {
-                    return Ok(id);
-                }
-            }
+        if let Ok(resp) = self.plesk_request(&xml)
+            && resp.status < 400
+            && let Some(id) = plesk_find_int(&resp.body, "id")
+        {
+            return Ok(id);
         }
         let xml = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -123,13 +130,21 @@ impl Pleskxml {
         );
         let resp = self.plesk_request(&xml)?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("pleskxml resolve site: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "pleskxml resolve site: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         plesk_find_int(&resp.body, "id")
             .ok_or_else(|| Error::Provider(format!("pleskxml: site not found for {domain}")))
     }
 
-    fn find_record_id(&self, site_id: &str, fulldomain: &str, value: &str) -> Result<Option<String>, Error> {
+    fn find_record_id(
+        &self,
+        site_id: &str,
+        fulldomain: &str,
+        value: &str,
+    ) -> Result<Option<String>, Error> {
         let xml = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <packet version="1.6.9.0">
@@ -166,17 +181,21 @@ impl Pleskxml {
             if r_type.as_deref() == Some("TXT")
                 && r_name.as_deref() == Some(&host_with_dot)
                 && r_value.as_deref() == Some(value)
+                && let Some(id) = plesk_find_int(record, "id")
             {
-                if let Some(id) = plesk_find_int(record, "id") {
-                    return Ok(Some(id));
-                }
+                return Ok(Some(id));
             }
             pos = rec_end;
         }
         Ok(None)
     }
 
-    fn create_record(&self, site_id: &str, record_name: &str, value: &str) -> Result<String, Error> {
+    fn create_record(
+        &self,
+        site_id: &str,
+        record_name: &str,
+        value: &str,
+    ) -> Result<String, Error> {
         let xml = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
 <packet version="1.6.9.0">
@@ -195,10 +214,14 @@ impl Pleskxml {
         );
         let resp = self.plesk_request(&xml)?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("pleskxml add record: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "pleskxml add record: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
-        plesk_find_int(&resp.body, "id")
-            .ok_or_else(|| Error::Provider("pleskxml: could not extract record id from create response".into()))
+        plesk_find_int(&resp.body, "id").ok_or_else(|| {
+            Error::Provider("pleskxml: could not extract record id from create response".into())
+        })
     }
 
     fn delete_record(&self, record_id: &str) -> Result<(), Error> {
@@ -217,7 +240,10 @@ impl Pleskxml {
         );
         let resp = self.plesk_request(&xml)?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("pleskxml delete record: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "pleskxml delete record: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }

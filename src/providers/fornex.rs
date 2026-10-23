@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -21,7 +21,8 @@ impl DnsProvider for Fornex {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("FORNEX_API_KEY")
+        let api_key = env
+            .get("FORNEX_API_KEY")
             .ok_or_else(|| Error::Config("FORNEX_API_KEY required".into()))?
             .clone();
         Ok(Box::new(Fornex { api_key }))
@@ -37,11 +38,18 @@ impl DnsProvider for Fornex {
         });
         let url = format!("{BASE_URL}/dns/domain/{zone_domain}/entry_set/");
         let auth = format!("Api-Key {}", self.api_key);
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &auth), ("Accept", "application/json")])
-            .map_err(|e| Error::Provider(format!("fornex add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth), ("Accept", "application/json")],
+        )
+        .map_err(|e| Error::Provider(format!("fornex add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("fornex add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "fornex add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -53,7 +61,10 @@ impl DnsProvider for Fornex {
         };
         let auth = format!("Api-Key {}", self.api_key);
         let list_url = format!("{BASE_URL}/dns/domain/{zone_domain}/entry_set?type=TXT&q={name}");
-        let resp = match http::get(&list_url, &[("Authorization", &auth), ("Accept", "application/json")]) {
+        let resp = match http::get(
+            &list_url,
+            &[("Authorization", &auth), ("Accept", "application/json")],
+        ) {
             Ok(r) => r,
             Err(_) => return Ok(()),
         };
@@ -64,19 +75,22 @@ impl DnsProvider for Fornex {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records = v.as_array()
+        let records = v
+            .as_array()
             .or_else(|| v.get("data").and_then(|d| d.as_array()))
             .or_else(|| v.get("results").and_then(|r| r.as_array()));
         if let Some(records) = records {
             for record in records {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("value").and_then(|v| v.as_str()) == Some(value)
+                    && let Some(id) = record_id(record)
                 {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/dns/domain/{zone_domain}/entry_set/{id}/");
-                        let _ = http::delete(&del_url, &[("Authorization", &auth), ("Accept", "application/json")]);
-                        return Ok(());
-                    }
+                    let del_url = format!("{BASE_URL}/dns/domain/{zone_domain}/entry_set/{id}/");
+                    let _ = http::delete(
+                        &del_url,
+                        &[("Authorization", &auth), ("Accept", "application/json")],
+                    );
+                    return Ok(());
                 }
             }
         }
@@ -94,7 +108,10 @@ impl Fornex {
                 break;
             }
             let url = format!("{BASE_URL}/dns/domain/?q={h}");
-            let resp = match http::get(&url, &[("Authorization", &auth), ("Accept", "application/json")]) {
+            let resp = match http::get(
+                &url,
+                &[("Authorization", &auth), ("Accept", "application/json")],
+            ) {
                 Ok(r) => r,
                 Err(_) => continue,
             };
@@ -102,15 +119,22 @@ impl Fornex {
                 return Ok(h);
             }
         }
-        Err(Error::Provider("fornex: unable to determine root domain".into()))
+        Err(Error::Provider(
+            "fornex: unable to determine root domain".into(),
+        ))
     }
 }
 
 fn record_id(v: &Value) -> Option<String> {
     v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
+        if i.is_string() {
+            i.as_str().map(|s| s.to_string())
+        } else if i.is_u64() {
+            i.as_u64().map(|n| n.to_string())
+        } else if i.is_i64() {
+            i.as_i64().map(|n| n.to_string())
+        } else {
+            None
+        }
     })
 }

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use ring::digest::{digest, SHA1_FOR_LEGACY_USE_ONLY};
+use ring::digest::{SHA1_FOR_LEGACY_USE_ONLY, digest};
 use ring::rand::SystemRandom;
-use ring::signature::{RsaKeyPair, RSA_PKCS1_SHA512};
+use ring::signature::{RSA_PKCS1_SHA512, RsaKeyPair};
 use serde_json::Value;
 
 use crate::base64;
@@ -73,10 +73,7 @@ impl DnsProvider for Transip {
             &url,
             &serde_json::to_vec(&body).unwrap(),
             "application/json",
-            &[
-                ("Authorization", &auth),
-                ("Accept", "application/json"),
-            ],
+            &[("Authorization", &auth), ("Accept", "application/json")],
         )
         .map_err(|e| Error::Provider(format!("TransIP add TXT: {e}")))?;
 
@@ -113,10 +110,7 @@ impl DnsProvider for Transip {
             &url,
             &serde_json::to_vec(&body).unwrap(),
             "application/json",
-            &[
-                ("Authorization", &auth),
-                ("Accept", "application/json"),
-            ],
+            &[("Authorization", &auth), ("Accept", "application/json")],
         );
         Ok(())
     }
@@ -150,10 +144,7 @@ impl Transip {
             &url,
             data_str.as_bytes(),
             "application/json",
-            &[
-                ("Signature", &signature),
-                ("Accept", "application/json"),
-            ],
+            &[("Signature", &signature), ("Accept", "application/json")],
         )
         .map_err(|e| Error::Provider(format!("TransIP auth: {e}")))?;
 
@@ -182,10 +173,7 @@ impl Transip {
             let auth = format!("Bearer {token}");
             match http::get(
                 &url,
-                &[
-                    ("Authorization", &auth),
-                    ("Accept", "application/json"),
-                ],
+                &[("Authorization", &auth), ("Accept", "application/json")],
             ) {
                 Ok(resp) if resp.status < 300 && resp.body.contains("dnsEntries") => {
                     return Ok((candidate, sub_domain));
@@ -203,8 +191,7 @@ fn pem_to_der(pem: &str) -> Result<Vec<u8>, Error> {
         .filter(|l| !l.starts_with("-----"))
         .collect::<Vec<_>>()
         .join("");
-    base64::decode_std(&b64)
-        .map_err(|e| Error::Crypto(format!("decode PEM: {e}")))
+    base64::decode_std(&b64).map_err(|e| Error::Crypto(format!("decode PEM: {e}")))
 }
 
 fn rsa_sign_sha512(key_pair: &RsaKeyPair, data: &[u8]) -> Result<String, Error> {

@@ -1,5 +1,5 @@
-use serde_json::Value;
 use crate::error::Error;
+use serde_json::Value;
 
 pub fn get_string<'a>(v: &'a Value, path: &[&str]) -> Option<&'a str> {
     let mut current = v;
@@ -33,7 +33,10 @@ pub fn get_object<'a>(v: &'a Value, path: &[&str]) -> Option<&'a serde_json::Map
     current.as_object()
 }
 
-pub fn get_object_required<'a>(v: &'a Value, path: &[&str]) -> Result<&'a serde_json::Map<String, Value>, Error> {
+pub fn get_object_required<'a>(
+    v: &'a Value,
+    path: &[&str],
+) -> Result<&'a serde_json::Map<String, Value>, Error> {
     get_object(v, path).ok_or_else(|| Error::Json(format!("missing object: {}", path.join("."))))
 }
 

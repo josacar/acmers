@@ -5,7 +5,11 @@ use std::panic::catch_unwind;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 
-type Handler = Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync>;
+type Handler = Arc<
+    dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>)
+        + Send
+        + Sync,
+>;
 
 pub struct MockServer {
     port: u16,
@@ -25,7 +29,9 @@ impl MockServer {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         stream.set_nonblocking(false).unwrap();
-                        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+                        stream
+                            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                            .unwrap();
                         let mut buf = Vec::new();
                         let mut tmp = [0u8; 4096];
                         let mut header_done = false;
@@ -36,10 +42,14 @@ impl MockServer {
                                 Ok(n) => {
                                     buf.extend_from_slice(&tmp[..n]);
                                     if !header_done {
-                                        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+                                        if let Some(pos) =
+                                            buf.windows(4).position(|w| w == b"\r\n\r\n")
+                                        {
                                             header_done = true;
-                                            let header_str = String::from_utf8_lossy(&buf[..pos]).to_lowercase();
-                                            content_length = header_str.lines()
+                                            let header_str =
+                                                String::from_utf8_lossy(&buf[..pos]).to_lowercase();
+                                            content_length = header_str
+                                                .lines()
                                                 .find(|l| l.starts_with("content-length:"))
                                                 .and_then(|l| l.split(':').nth(1))
                                                 .and_then(|v| v.trim().parse().ok())
@@ -50,13 +60,17 @@ impl MockServer {
                                             }
                                         }
                                     } else {
-                                        let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+                                        let header_end =
+                                            buf.windows(4).position(|w| w == b"\r\n\r\n").unwrap()
+                                                + 4;
                                         if buf.len() - header_end >= content_length {
                                             break;
                                         }
                                     }
                                 }
-                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+                                Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                    continue;
+                                }
                                 Err(_) => break,
                             }
                         }
@@ -68,13 +82,17 @@ impl MockServer {
                             }));
                             let (status, resp_body, resp_headers) = match result {
                                 Ok(r) => r,
-                                Err(_) => (500, r#"{"error":"mock handler panic"}"#.to_string(), HashMap::new()),
+                                Err(_) => (
+                                    500,
+                                    r#"{"error":"mock handler panic"}"#.to_string(),
+                                    HashMap::new(),
+                                ),
                             };
                             let mut response = format!("HTTP/1.1 {status} OK\r\n");
                             for (k, v) in &resp_headers {
                                 response.push_str(&format!("{k}: {v}\r\n"));
                             }
-                            if resp_headers.get("Content-Type").is_none() {
+                            if !resp_headers.contains_key("Content-Type") {
                                 response.push_str("Content-Type: application/json\r\n");
                             }
                             response.push_str(&format!("Content-Length: {}\r\n", resp_body.len()));
@@ -105,10 +123,6 @@ impl MockServer {
     pub fn url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
     }
-
-    pub fn url_for(&self, original_host: &str) -> String {
-        format!("http://127.0.0.1:{}/{}", self.port, original_host)
-    }
 }
 
 impl Drop for MockServer {
@@ -125,7 +139,11 @@ impl Drop for MockServer {
 fn parse_request(req: &str) -> (String, String, Vec<u8>, HashMap<String, String>) {
     let parts: Vec<&str> = req.splitn(2, "\r\n\r\n").collect();
     let header_part = parts[0];
-    let body_bytes = if parts.len() > 1 { parts[1].as_bytes().to_vec() } else { vec![] };
+    let body_bytes = if parts.len() > 1 {
+        parts[1].as_bytes().to_vec()
+    } else {
+        vec![]
+    };
 
     let lines: Vec<&str> = header_part.split("\r\n").collect();
     if lines.is_empty() {
@@ -145,4 +163,3 @@ fn parse_request(req: &str) -> (String, String, Vec<u8>, HashMap<String, String>
 
     (method, path, body_bytes, headers)
 }
-

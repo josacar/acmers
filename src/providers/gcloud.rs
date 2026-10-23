@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use ring::rand::SystemRandom;
-use ring::signature::{RsaKeyPair, RSA_PKCS1_SHA256};
+use ring::signature::{RSA_PKCS1_SHA256, RsaKeyPair};
 use serde_json::Value;
 
 use crate::error::Error;
@@ -28,7 +28,8 @@ impl DnsProvider for Gcloud {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let sa_key_json = env.get("GCLOUD_SERVICE_ACCOUNT_KEY")
+        let sa_key_json = env
+            .get("GCLOUD_SERVICE_ACCOUNT_KEY")
             .cloned()
             .or_else(|| std::env::var("GCLOUD_SERVICE_ACCOUNT_KEY").ok())
             .ok_or_else(|| Error::Config("GCLOUD_SERVICE_ACCOUNT_KEY required".into()))?;
@@ -40,23 +41,37 @@ impl DnsProvider for Gcloud {
         let sa_key: Value = serde_json::from_str(&sa_key_json)
             .map_err(|e| Error::Config(format!("GCLOUD_SERVICE_ACCOUNT_KEY invalid JSON: {e}")))?;
 
-        let client_email = sa_key.get("client_email").and_then(|v| v.as_str())
+        let client_email = sa_key
+            .get("client_email")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| Error::Config("service account key missing client_email".into()))?;
-        let private_key_pem = sa_key.get("private_key").and_then(|v| v.as_str())
+        let private_key_pem = sa_key
+            .get("private_key")
+            .and_then(|v| v.as_str())
             .ok_or_else(|| Error::Config("service account key missing private_key".into()))?;
-        let token_uri = sa_key.get("token_uri").and_then(|v| v.as_str())
+        let token_uri = sa_key
+            .get("token_uri")
+            .and_then(|v| v.as_str())
             .unwrap_or(DEFAULT_TOKEN_URI);
         let key_project_id = sa_key.get("project_id").and_then(|v| v.as_str());
 
-        let project = env.get("GCLOUD_PROJECT")
+        let project = env
+            .get("GCLOUD_PROJECT")
             .cloned()
             .or_else(|| std::env::var("GCLOUD_PROJECT").ok())
             .or_else(|| key_project_id.map(|s| s.to_string()))
-            .ok_or_else(|| Error::Config("GCLOUD_PROJECT required (or set project_id in service account key)".into()))?;
+            .ok_or_else(|| {
+                Error::Config(
+                    "GCLOUD_PROJECT required (or set project_id in service account key)".into(),
+                )
+            })?;
 
         let access_token = get_access_token(client_email, private_key_pem, token_uri)?;
 
-        Ok(Box::new(Gcloud { project, access_token }))
+        Ok(Box::new(Gcloud {
+            project,
+            access_token,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -71,12 +86,23 @@ impl DnsProvider for Gcloud {
                 "rrdatas": [value],
             }]
         });
-        let url = format!("{BASE_URL}/{project}/managedZones/{zone_name}/changes", project = self.project);
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("GCloud add TXT: {e}")))?;
+        let url = format!(
+            "{BASE_URL}/{project}/managedZones/{zone_name}/changes",
+            project = self.project
+        );
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("GCloud add TXT: {e}")))?;
 
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("GCloud add TXT: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "GCloud add TXT: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -96,8 +122,16 @@ impl DnsProvider for Gcloud {
                 "rrdatas": [value],
             }]
         });
-        let url = format!("{BASE_URL}/{project}/managedZones/{zone_name}/changes", project = self.project);
-        let _ = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &auth)]);
+        let url = format!(
+            "{BASE_URL}/{project}/managedZones/{zone_name}/changes",
+            project = self.project
+        );
+        let _ = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        );
         Ok(())
     }
 }
@@ -110,7 +144,10 @@ impl Gcloud {
             .map_err(|e| Error::Provider(format!("GCloud list zones: {e}")))?;
 
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("GCloud list zones: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "GCloud list zones: {} {}",
+                resp.status, resp.body
+            )));
         }
 
         let v: Value = serde_json::from_str(&resp.body)
@@ -126,12 +163,13 @@ impl Gcloud {
 
         if let Some(zones) = v.get("managedZones").and_then(|z| z.as_array()) {
             for zone in zones {
-                if let Some(dns_name) = zone.get("dnsName").and_then(|n| n.as_str()) {
-                    if search.ends_with(dns_name) && dns_name.len() > best_len {
-                        best_len = dns_name.len();
-                        if let Some(name) = zone.get("name").and_then(|n| n.as_str()) {
-                            best_name = name.to_string();
-                        }
+                if let Some(dns_name) = zone.get("dnsName").and_then(|n| n.as_str())
+                    && search.ends_with(dns_name)
+                    && dns_name.len() > best_len
+                {
+                    best_len = dns_name.len();
+                    if let Some(name) = zone.get("name").and_then(|n| n.as_str()) {
+                        best_name = name.to_string();
                     }
                 }
             }
@@ -144,22 +182,34 @@ impl Gcloud {
     }
 }
 
-fn get_access_token(client_email: &str, private_key_pem: &str, token_uri: &str) -> Result<String, Error> {
+fn get_access_token(
+    client_email: &str,
+    private_key_pem: &str,
+    token_uri: &str,
+) -> Result<String, Error> {
     let jwt = create_jwt(client_email, private_key_pem, token_uri)?;
 
-    let body = format!(
-        "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={jwt}"
-    );
-    let resp = http::post(token_uri, body.as_bytes(), "application/x-www-form-urlencoded", &[])
-        .map_err(|e| Error::Provider(format!("GCloud token exchange: {e}")))?;
+    let body =
+        format!("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={jwt}");
+    let resp = http::post(
+        token_uri,
+        body.as_bytes(),
+        "application/x-www-form-urlencoded",
+        &[],
+    )
+    .map_err(|e| Error::Provider(format!("GCloud token exchange: {e}")))?;
 
     if resp.status >= 300 {
-        return Err(Error::Provider(format!("GCloud token exchange: {} {}", resp.status, resp.body)));
+        return Err(Error::Provider(format!(
+            "GCloud token exchange: {} {}",
+            resp.status, resp.body
+        )));
     }
 
     let v: Value = serde_json::from_str(&resp.body)
         .map_err(|e| Error::Json(format!("GCloud token response: {e}")))?;
-    v.get("access_token").and_then(|t| t.as_str())
+    v.get("access_token")
+        .and_then(|t| t.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| Error::Provider("no access_token in token response".into()))
 }
@@ -179,8 +229,10 @@ fn create_jwt(client_email: &str, private_key_pem: &str, token_uri: &str) -> Res
         "exp": now + 3600,
     });
 
-    let header_b64 = crate::base64::encode_no_pad(serde_json::to_string(&header).unwrap().as_bytes());
-    let claims_b64 = crate::base64::encode_no_pad(serde_json::to_string(&claims).unwrap().as_bytes());
+    let header_b64 =
+        crate::base64::encode_no_pad(serde_json::to_string(&header).unwrap().as_bytes());
+    let claims_b64 =
+        crate::base64::encode_no_pad(serde_json::to_string(&claims).unwrap().as_bytes());
     let signing_input = format!("{header_b64}.{claims_b64}");
 
     let der = pem_to_der(private_key_pem)?;
@@ -189,7 +241,8 @@ fn create_jwt(client_email: &str, private_key_pem: &str, token_uri: &str) -> Res
 
     let rng = SystemRandom::new();
     let mut sig = vec![0u8; key_pair.public().modulus_len()];
-    key_pair.sign(&RSA_PKCS1_SHA256, &rng, signing_input.as_bytes(), &mut sig)
+    key_pair
+        .sign(&RSA_PKCS1_SHA256, &rng, signing_input.as_bytes(), &mut sig)
         .map_err(|e| Error::Crypto(format!("JWT sign: {e}")))?;
 
     let sig_b64 = crate::base64::encode_no_pad(&sig);

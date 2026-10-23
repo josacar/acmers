@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for Vscale {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("VSCALE_API_KEY")
+        let api_key = env
+            .get("VSCALE_API_KEY")
             .ok_or_else(|| Error::Config("VSCALE_API_KEY required".into()))?
             .clone();
         Ok(Box::new(Vscale { api_key }))
@@ -32,12 +33,16 @@ impl DnsProvider for Vscale {
             "name": name,
             "content": value,
             "ttl": 120,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.vscale.io/v1/domains/{domain}/records");
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("Vscale add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Vscale add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Vscale add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -63,14 +68,17 @@ impl DnsProvider for Vscale {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("content").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.vscale.io/v1/domains/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url = format!("https://api.vscale.io/v1/domains/{domain}/records/{id}");
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }

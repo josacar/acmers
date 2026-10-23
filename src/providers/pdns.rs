@@ -1,8 +1,9 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Powerdns {
@@ -22,15 +23,28 @@ impl DnsProvider for Powerdns {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let base_url = env.get("PDNS_Url")
-            .ok_or_else(|| Error::Config("PDNS_Url required".into()))?.clone();
-        let server_id = env.get("PDNS_ServerId")
-            .map(|s| s.clone()).unwrap_or_else(|| "localhost".to_string());
-        let token = env.get("PDNS_Token")
-            .ok_or_else(|| Error::Config("PDNS_Token required".into()))?.clone();
-        let ttl = env.get("PDNS_Ttl")
-            .and_then(|t| t.parse().ok()).unwrap_or(60);
-        Ok(Box::new(Powerdns { token, base_url, server_id, ttl }))
+        let base_url = env
+            .get("PDNS_Url")
+            .ok_or_else(|| Error::Config("PDNS_Url required".into()))?
+            .clone();
+        let server_id = env
+            .get("PDNS_ServerId")
+            .cloned()
+            .unwrap_or_else(|| "localhost".to_string());
+        let token = env
+            .get("PDNS_Token")
+            .ok_or_else(|| Error::Config("PDNS_Token required".into()))?
+            .clone();
+        let ttl = env
+            .get("PDNS_Ttl")
+            .and_then(|t| t.parse().ok())
+            .unwrap_or(60);
+        Ok(Box::new(Powerdns {
+            token,
+            base_url,
+            server_id,
+            ttl,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -43,15 +57,23 @@ impl DnsProvider for Powerdns {
                 "ttl": self.ttl,
                 "changetype": "REPLACE",
                 "records": [{
-                    "content": format!("\"{value}\""),
+                    "content": helpers::txt_value(value),
                     "disabled": false,
                 }],
             }],
         });
-        let resp = http::patch(&zone_url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("X-API-Key", &self.token)])
-            .map_err(|e| Error::Provider(format!("pdns add TXT: {e}")))?;
+        let resp = http::patch(
+            &zone_url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("X-API-Key", &self.token)],
+        )
+        .map_err(|e| Error::Provider(format!("pdns add TXT: {e}")))?;
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("pdns add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "pdns add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -73,7 +95,13 @@ impl DnsProvider for Powerdns {
                 "changetype": "DELETE",
             }],
         });
-        http::patch(&zone_url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("X-API-Key", &self.token)]).ok();
+        http::patch(
+            &zone_url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("X-API-Key", &self.token)],
+        )
+        .ok();
         Ok(())
     }
 }
@@ -89,10 +117,10 @@ impl Powerdns {
             for z in zones {
                 if let Some(zname) = z.get("name").and_then(|n| n.as_str()) {
                     let zname_clean = zname.trim_end_matches('.');
-                    if domain == zname_clean || domain.ends_with(&format!(".{zname_clean}")) {
-                        if let Some(zone_url) = z.get("url").and_then(|u| u.as_str()) {
-                            return Ok(zone_url.to_string());
-                        }
+                    if (domain == zname_clean || domain.ends_with(&format!(".{zname_clean}")))
+                        && let Some(zone_url) = z.get("url").and_then(|u| u.as_str())
+                    {
+                        return Ok(zone_url.to_string());
                     }
                 }
             }

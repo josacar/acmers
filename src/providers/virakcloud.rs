@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -21,7 +21,8 @@ impl DnsProvider for Virakcloud {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("VIRAKCLOUD_API_TOKEN")
+        let token = env
+            .get("VIRAKCLOUD_API_TOKEN")
             .ok_or_else(|| Error::Config("VIRAKCLOUD_API_TOKEN required".into()))?
             .clone();
         Ok(Box::new(Virakcloud { token }))
@@ -40,11 +41,18 @@ impl DnsProvider for Virakcloud {
             "content": value,
         });
         let url = format!("{BASE_URL}/domains/{zone}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("virakcloud add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("virakcloud add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("virakcloud add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "virakcloud add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -78,7 +86,11 @@ impl DnsProvider for Virakcloud {
 impl Virakcloud {
     fn resolve_zone(&self, fulldomain: &str, auth: &str) -> Result<String, Error> {
         let parts: Vec<&str> = fulldomain.split('.').collect();
-        let start = if fulldomain.starts_with("_acme-challenge.") { 2 } else { 1 };
+        let start = if fulldomain.starts_with("_acme-challenge.") {
+            2
+        } else {
+            1
+        };
 
         for i in start..parts.len() {
             let h = parts[i..].join(".");
@@ -88,12 +100,11 @@ impl Virakcloud {
             let url = format!("{BASE_URL}/domains/{h}");
             match http::get(&url, &[("Authorization", auth)]) {
                 Ok(resp) => {
-                    if resp.status < 400 {
-                        if let Ok(v) = serde_json::from_str::<Value>(&resp.body) {
-                            if v.get("name").is_some() {
-                                return Ok(h);
-                            }
-                        }
+                    if resp.status < 400
+                        && let Ok(v) = serde_json::from_str::<Value>(&resp.body)
+                        && v.get("name").is_some()
+                    {
+                        return Ok(h);
                     }
                 }
                 Err(_) => continue,
@@ -111,10 +122,10 @@ fn find_content_id(body: &str, txtvalue: &str) -> Option<String> {
 fn find_content_id_recursive(v: &Value, txtvalue: &str) -> Option<String> {
     match v {
         Value::Object(map) => {
-            if let (Some(id), Some(raw)) = (map.get("id"), map.get("content_raw")) {
-                if raw.as_str() == Some(txtvalue) {
-                    return id.as_str().map(|s| s.to_string());
-                }
+            if let (Some(id), Some(raw)) = (map.get("id"), map.get("content_raw"))
+                && raw.as_str() == Some(txtvalue)
+            {
+                return id.as_str().map(|s| s.to_string());
             }
             for val in map.values() {
                 if let Some(found) = find_content_id_recursive(val, txtvalue) {

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for Mijnhost {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("MIJNHOST_API_KEY")
+        let api_key = env
+            .get("MIJNHOST_API_KEY")
             .ok_or_else(|| Error::Config("MIJNHOST_API_KEY required".into()))?
             .clone();
         Ok(Box::new(Mijnhost { api_key }))
@@ -32,11 +33,15 @@ impl DnsProvider for Mijnhost {
         let resp = http::get(&url, headers)
             .map_err(|e| Error::Provider(format!("Mijnhost get DNS: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Mijnhost get DNS: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Mijnhost get DNS: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Mijnhost parse DNS: {e}")))?;
-        let mut records = v.get("records")
+        let mut records = v
+            .get("records")
             .and_then(|r| r.as_array())
             .cloned()
             .unwrap_or_default();
@@ -48,11 +53,15 @@ impl DnsProvider for Mijnhost {
         }));
         let body = serde_json::to_vec(&serde_json::json!({
             "records": records,
-        })).unwrap();
+        }))
+        .unwrap();
         let resp = http::put(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("Mijnhost add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Mijnhost add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Mijnhost add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -72,11 +81,13 @@ impl DnsProvider for Mijnhost {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records = v.get("records")
+        let records = v
+            .get("records")
             .and_then(|r| r.as_array())
             .cloned()
             .unwrap_or_default();
-        let filtered: Vec<Value> = records.into_iter()
+        let filtered: Vec<Value> = records
+            .into_iter()
             .filter(|r| {
                 !(r.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && r.get("value").and_then(|v| v.as_str()) == Some(value))
@@ -84,13 +95,17 @@ impl DnsProvider for Mijnhost {
             .collect();
         let body = serde_json::to_vec(&serde_json::json!({
             "records": filtered,
-        })).unwrap();
+        }))
+        .unwrap();
         let resp = match http::put(&url, &body, "application/json", headers) {
             Ok(r) => r,
             Err(_) => return Ok(()),
         };
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Mijnhost remove TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Mijnhost remove TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -104,13 +119,15 @@ impl Mijnhost {
             .map_err(|e| Error::Json(format!("Mijnhost domains: {e}")))?;
         if let Some(domains) = v.get("data").and_then(|d| d.as_array()) {
             for d in domains {
-                if let Some(domain_name) = d.get("domain").and_then(|n| n.as_str()) {
-                    if fulldomain.contains(domain_name) {
-                        return Ok(domain_name.to_string());
-                    }
+                if let Some(domain_name) = d.get("domain").and_then(|n| n.as_str())
+                    && fulldomain.contains(domain_name)
+                {
+                    return Ok(domain_name.to_string());
                 }
             }
         }
-        Err(Error::Provider(format!("domain not found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "domain not found for {fulldomain}"
+        )))
     }
 }

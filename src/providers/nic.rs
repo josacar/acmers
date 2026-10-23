@@ -20,21 +20,30 @@ impl DnsProvider for Nic {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["NIC_ClientID", "NIC_ClientSecret", "NIC_Username", "NIC_Password"]
+        &[
+            "NIC_ClientID",
+            "NIC_ClientSecret",
+            "NIC_Username",
+            "NIC_Password",
+        ]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
         Ok(Box::new(Nic {
-            client_id: env.get("NIC_ClientID")
+            client_id: env
+                .get("NIC_ClientID")
                 .ok_or_else(|| Error::Config("NIC_ClientID required".into()))?
                 .clone(),
-            client_secret: env.get("NIC_ClientSecret")
+            client_secret: env
+                .get("NIC_ClientSecret")
                 .ok_or_else(|| Error::Config("NIC_ClientSecret required".into()))?
                 .clone(),
-            username: env.get("NIC_Username")
+            username: env
+                .get("NIC_Username")
                 .ok_or_else(|| Error::Config("NIC_Username required".into()))?
                 .clone(),
-            password: env.get("NIC_Password")
+            password: env
+                .get("NIC_Password")
                 .ok_or_else(|| Error::Config("NIC_Password required".into()))?
                 .clone(),
         }))
@@ -49,15 +58,23 @@ impl DnsProvider for Nic {
             xml_escape(value),
         );
         let url = format!("{API_BASE}/dns-master/services/{service}/zones/{zone}/records");
-        let resp = http::put(&url, xml.as_bytes(), "application/xml", &[
-            ("Authorization", &format!("Bearer {token}")),
-        ]).map_err(|e| Error::Provider(format!("nic add record: {e}")))?;
+        let resp = http::put(
+            &url,
+            xml.as_bytes(),
+            "application/xml",
+            &[("Authorization", &format!("Bearer {token}"))],
+        )
+        .map_err(|e| Error::Provider(format!("nic add record: {e}")))?;
         nic_check_response(&resp.body)?;
 
         let commit_url = format!("{API_BASE}/dns-master/services/{service}/zones/{zone}/commit");
-        let resp = http::post(&commit_url, b"", "application/xml", &[
-            ("Authorization", &format!("Bearer {token}")),
-        ]).map_err(|e| Error::Provider(format!("nic commit: {e}")))?;
+        let resp = http::post(
+            &commit_url,
+            b"",
+            "application/xml",
+            &[("Authorization", &format!("Bearer {token}"))],
+        )
+        .map_err(|e| Error::Provider(format!("nic commit: {e}")))?;
         nic_check_response(&resp.body)?;
         let _ = name;
         Ok(())
@@ -74,9 +91,7 @@ impl DnsProvider for Nic {
         };
 
         let list_url = format!("{API_BASE}/dns-master/services/{service}/zones/{zone}/records");
-        let resp = match http::get(&list_url, &[
-            ("Authorization", &format!("Bearer {token}")),
-        ]) {
+        let resp = match http::get(&list_url, &[("Authorization", &format!("Bearer {token}"))]) {
             Ok(r) => r,
             Err(_) => return Ok(()),
         };
@@ -86,15 +101,22 @@ impl DnsProvider for Nic {
             None => return Ok(()),
         };
 
-        let del_url = format!("{API_BASE}/dns-master/services/{service}/zones/{zone}/records/{record_id}");
-        let _ = http::delete_with_body(&del_url, b"", "application/xml", &[
-            ("Authorization", &format!("Bearer {token}")),
-        ]);
+        let del_url =
+            format!("{API_BASE}/dns-master/services/{service}/zones/{zone}/records/{record_id}");
+        let _ = http::delete_with_body(
+            &del_url,
+            b"",
+            "application/xml",
+            &[("Authorization", &format!("Bearer {token}"))],
+        );
 
         let commit_url = format!("{API_BASE}/dns-master/services/{service}/zones/{zone}/commit");
-        let _ = http::post(&commit_url, b"", "application/xml", &[
-            ("Authorization", &format!("Bearer {token}")),
-        ]);
+        let _ = http::post(
+            &commit_url,
+            b"",
+            "application/xml",
+            &[("Authorization", &format!("Bearer {token}"))],
+        );
         let _ = name;
         Ok(())
     }
@@ -102,25 +124,33 @@ impl DnsProvider for Nic {
 
 impl Nic {
     fn get_auth_token(&self) -> Result<String, Error> {
-        let creds = base64::encode_std(format!("{}:{}", self.client_id, self.client_secret).as_bytes());
+        let creds =
+            base64::encode_std(format!("{}:{}", self.client_id, self.client_secret).as_bytes());
         let body = format!(
             "grant_type=password&username={}&password={}&scope=%28GET%7CPUT%7CPOST%7CDELETE%29%3A%2Fdns-master%2F.%2B",
             self.username, self.password,
         );
         let url = format!("{API_BASE}/oauth/token");
-        let resp = http::post(&url, body.as_bytes(), "application/x-www-form-urlencoded", &[
-            ("Authorization", &format!("Basic {creds}")),
-        ]).map_err(|e| Error::Provider(format!("nic auth: {e}")))?;
+        let resp = http::post(
+            &url,
+            body.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[("Authorization", &format!("Basic {creds}"))],
+        )
+        .map_err(|e| Error::Provider(format!("nic auth: {e}")))?;
 
-        extract_access_token(&resp.body)
-            .ok_or_else(|| Error::Provider(format!("nic auth: no access_token in response: {}", resp.body)))
+        extract_access_token(&resp.body).ok_or_else(|| {
+            Error::Provider(format!(
+                "nic auth: no access_token in response: {}",
+                resp.body
+            ))
+        })
     }
 
     fn get_root(&self, domain: &str, token: &str) -> Result<(String, String, String), Error> {
         let url = format!("{API_BASE}/dns-master/zones");
-        let resp = http::get(&url, &[
-            ("Authorization", &format!("Bearer {token}")),
-        ]).map_err(|e| Error::Provider(format!("nic list zones: {e}")))?;
+        let resp = http::get(&url, &[("Authorization", &format!("Bearer {token}"))])
+            .map_err(|e| Error::Provider(format!("nic list zones: {e}")))?;
 
         let zones = parse_zones(&resp.body);
         let parts: Vec<&str> = domain.split('.').collect();
@@ -163,7 +193,10 @@ fn parse_zones(xml: &str) -> Vec<ZoneInfo> {
         let service = extract_attr(tag, "service");
 
         if let (Some(name), Some(svc)) = (idn_name, service) {
-            zones.push(ZoneInfo { idn_name: name, service: svc });
+            zones.push(ZoneInfo {
+                idn_name: name,
+                service: svc,
+            });
         }
         pos = tag_end;
     }
@@ -195,10 +228,11 @@ fn find_record_id(xml: &str, sub_domain: &str, value: &str) -> Option<String> {
         let name_tag = find_xml_text(record, "name");
         let string_tag = find_xml_text(record, "string");
 
-        if name_tag.as_deref() == Some(sub_domain) && string_tag.as_deref() == Some(value) {
-            if let Some(rid) = id {
-                return Some(rid);
-            }
+        if name_tag.as_deref() == Some(sub_domain)
+            && string_tag.as_deref() == Some(value)
+            && let Some(rid) = id
+        {
+            return Some(rid);
         }
         pos = rr_end;
     }
@@ -251,7 +285,9 @@ fn nic_check_response(body: &str) -> Result<(), Error> {
         return Err(Error::Provider(format!("nic API error: {error}")));
     }
     if !body.contains("<status>success</status>") {
-        return Err(Error::Provider(format!("nic API: unexpected response: {body}")));
+        return Err(Error::Provider(format!(
+            "nic API: unexpected response: {body}"
+        )));
     }
     Ok(())
 }
@@ -313,8 +349,14 @@ mod tests {
             <rr id="rec123"><name>_acme-challenge</name><type>TXT</type><txt><string>testval</string></txt></rr>
             <rr id="rec456"><name>other</name><type>TXT</type><txt><string>otherval</string></txt></rr>
         </rr-list></response>"#;
-        assert_eq!(find_record_id(xml, "_acme-challenge", "testval"), Some("rec123".to_string()));
-        assert_eq!(find_record_id(xml, "other", "otherval"), Some("rec456".to_string()));
+        assert_eq!(
+            find_record_id(xml, "_acme-challenge", "testval"),
+            Some("rec123".to_string())
+        );
+        assert_eq!(
+            find_record_id(xml, "other", "otherval"),
+            Some("rec456".to_string())
+        );
         assert_eq!(find_record_id(xml, "nonexistent", "testval"), None);
     }
 

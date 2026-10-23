@@ -20,7 +20,8 @@ impl DnsProvider for Online {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("ONLINE_API_KEY")
+        let api_key = env
+            .get("ONLINE_API_KEY")
             .ok_or_else(|| Error::Config("ONLINE_API_KEY required".into()))?
             .clone();
         Ok(Box::new(Online { api_key }))
@@ -50,7 +51,9 @@ impl DnsProvider for Online {
             Err(_) => return Ok(()),
         };
         let _ = self.enable_zone(&zone, &temp_version);
-        let _ = self.api_delete(&format!("domain/{zone}/version/{real_version}/zone/{record_id}"));
+        let _ = self.api_delete(&format!(
+            "domain/{zone}/version/{real_version}/zone/{record_id}"
+        ));
         let _ = self.enable_zone(&zone, &real_version);
         let _ = self.destroy_zone(&zone, &temp_version);
         Ok(())
@@ -72,17 +75,25 @@ impl Online {
     fn api_post(&self, path: &str, body: &str) -> Result<http::Response, Error> {
         let url = format!("{API_BASE}/{path}");
         let auth = self.auth_header();
-        http::post(&url, body.as_bytes(), "application/x-www-form-urlencoded",
-            &[("Authorization", &auth), ("X-Pretty-JSON", "1")])
-            .map_err(|e| Error::Provider(format!("Online.net POST: {e}")))
+        http::post(
+            &url,
+            body.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[("Authorization", &auth), ("X-Pretty-JSON", "1")],
+        )
+        .map_err(|e| Error::Provider(format!("Online.net POST: {e}")))
     }
 
     fn api_patch(&self, path: &str) -> Result<http::Response, Error> {
         let url = format!("{API_BASE}/{path}");
         let auth = self.auth_header();
-        http::patch(&url, &[], "application/x-www-form-urlencoded",
-            &[("Authorization", &auth), ("X-Pretty-JSON", "1")])
-            .map_err(|e| Error::Provider(format!("Online.net PATCH: {e}")))
+        http::patch(
+            &url,
+            &[],
+            "application/x-www-form-urlencoded",
+            &[("Authorization", &auth), ("X-Pretty-JSON", "1")],
+        )
+        .map_err(|e| Error::Provider(format!("Online.net PATCH: {e}")))
     }
 
     fn api_delete(&self, path: &str) -> Result<http::Response, Error> {
@@ -107,7 +118,9 @@ impl Online {
                 return Ok((h, sub_domain, version));
             }
         }
-        Err(Error::Provider(format!("Online.net: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "Online.net: zone not found for {domain}"
+        )))
     }
 
     fn create_temp_version(&self, zone: &str) -> Result<String, Error> {
@@ -128,22 +141,36 @@ impl Online {
         Ok(())
     }
 
-    fn create_txt_record(&self, zone: &str, version: &str, name: &str, value: &str) -> Result<(), Error> {
+    fn create_txt_record(
+        &self,
+        zone: &str,
+        version: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<(), Error> {
         let data = format!("type=TXT&name={name}&data=%22{value}%22&ttl=60&priority=0");
         self.api_post(&format!("domain/{zone}/version/{version}/zone"), &data)?;
         Ok(())
     }
 
-    fn find_record_id(&self, zone: &str, _version: &str, sub_domain: &str, value: &str) -> Result<String, Error> {
+    fn find_record_id(
+        &self,
+        zone: &str,
+        _version: &str,
+        sub_domain: &str,
+        value: &str,
+    ) -> Result<String, Error> {
         let resp = self.api_get(&format!("domain/{zone}/version/active"))?;
         let quoted = format!("\\u0022{value}\\u0022");
         let needle = format!("\"name\":\"{sub_domain}\",\"data\":\"{quoted}\"");
         if let Some(pos) = resp.body.find(&needle) {
-            let start = if pos > 100 { pos - 100 } else { 0 };
+            let start = pos.saturating_sub(100);
             let chunk = &resp.body[start..pos];
             if let Some(id_pos) = chunk.rfind("\"id\":") {
                 let rest = &chunk[id_pos + 5..];
-                let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+                let end = rest
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(rest.len());
                 if end > 0 {
                     return Ok(rest[..end].to_string());
                 }

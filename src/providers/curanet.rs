@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -21,13 +21,18 @@ impl DnsProvider for Curanet {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let client_id = env.get("CURANET_AUTH_CLIENT_ID")
+        let client_id = env
+            .get("CURANET_AUTH_CLIENT_ID")
             .ok_or_else(|| Error::Config("CURANET_AUTH_CLIENT_ID required".into()))?
             .clone();
-        let client_secret = env.get("CURANET_AUTH_CLIENT_SECRET")
+        let client_secret = env
+            .get("CURANET_AUTH_CLIENT_SECRET")
             .ok_or_else(|| Error::Config("CURANET_AUTH_CLIENT_SECRET required".into()))?
             .clone();
-        Ok(Box::new(Curanet { client_id, client_secret }))
+        Ok(Box::new(Curanet {
+            client_id,
+            client_secret,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -40,16 +45,27 @@ impl DnsProvider for Curanet {
             "ttl": 60,
             "priority": 0,
             "data": value,
-        })).unwrap();
+        }))
+        .unwrap();
         let auth = format!("Bearer {token}");
-        let resp = http::post(&url, &body, "application/json",
-            &[("Authorization", &auth), ("Accept", "application/json")])
-            .map_err(|e| Error::Provider(format!("Curanet add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &body,
+            "application/json",
+            &[("Authorization", &auth), ("Accept", "application/json")],
+        )
+        .map_err(|e| Error::Provider(format!("Curanet add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Curanet add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Curanet add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         if !resp.body.contains(value) {
-            return Err(Error::Provider(format!("Curanet add TXT: unexpected response: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "Curanet add TXT: unexpected response: {}",
+                resp.body
+            )));
         }
         Ok(())
     }
@@ -65,7 +81,10 @@ impl DnsProvider for Curanet {
         };
         let url = format!("https://api.curanet.dk/dns/v1/Domains/{zone}/Records");
         let auth = format!("Bearer {token}");
-        let resp = match http::get(&url, &[("Authorization", &auth), ("Accept", "application/json")]) {
+        let resp = match http::get(
+            &url,
+            &[("Authorization", &auth), ("Accept", "application/json")],
+        ) {
             Ok(r) => r,
             Err(_) => return Ok(()),
         };
@@ -79,13 +98,17 @@ impl DnsProvider for Curanet {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("data").and_then(|d| d.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.curanet.dk/dns/v1/Domains/{zone}/Records/{id}");
-                        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
-                    }
+                    let del_url =
+                        format!("https://api.curanet.dk/dns/v1/Domains/{zone}/Records/{id}");
+                    let _ = http::delete(&del_url, &[("Authorization", &auth)]);
                 }
             }
         }
@@ -104,7 +127,8 @@ impl Curanet {
             data.as_bytes(),
             "application/x-www-form-urlencoded",
             &[],
-        ).map_err(|e| Error::Provider(format!("Curanet auth: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("Curanet auth: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Curanet auth: {e}")))?;
         let token = j::get_string_required(&v, &["access_token"])?;
@@ -127,6 +151,8 @@ impl Curanet {
                 return Ok(h);
             }
         }
-        Err(Error::Provider(format!("Curanet: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "Curanet: zone not found for {domain}"
+        )))
     }
 }

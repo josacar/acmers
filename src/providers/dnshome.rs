@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -20,10 +20,12 @@ impl DnsProvider for Dnshome {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("DNSHOME_Username")
+        let username = env
+            .get("DNSHOME_Username")
             .ok_or_else(|| Error::Config("DNSHOME_Username required".into()))?
             .clone();
-        let password = env.get("DNSHOME_Password")
+        let password = env
+            .get("DNSHOME_Password")
             .ok_or_else(|| Error::Config("DNSHOME_Password required".into()))?
             .clone();
         let creds = format!("{username}:{password}");
@@ -40,10 +42,18 @@ impl DnsProvider for Dnshome {
             "ttl": 120,
         });
         let url = format!("https://www.dnshome.de/api/v1/domains/{domain}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
-            .map_err(|e| Error::Provider(format!("dnshome add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("dnshome add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("dnshome add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "dnshome add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -64,14 +74,18 @@ impl DnsProvider for Dnshome {
                 if r.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && r.get("name").and_then(|n| n.as_str()) == Some(name)
                     && r.get("content").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = r.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = r.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://www.dnshome.de/api/v1/domains/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url =
+                        format!("https://www.dnshome.de/api/v1/domains/{domain}/records/{id}");
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }

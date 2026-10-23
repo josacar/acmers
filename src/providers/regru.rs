@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 const BASE_URL: &str = "https://api.reg.ru/api/regru2";
@@ -21,10 +22,12 @@ impl DnsProvider for Regru {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("REGRU_Username")
+        let username = env
+            .get("REGRU_Username")
             .ok_or_else(|| Error::Config("REGRU_Username required".into()))?
             .clone();
-        let password = env.get("REGRU_Password")
+        let password = env
+            .get("REGRU_Password")
             .ok_or_else(|| Error::Config("REGRU_Password required".into()))?
             .clone();
         Ok(Box::new(Regru { username, password }))
@@ -43,7 +46,7 @@ impl DnsProvider for Regru {
             "output_content_type": "plain"
         });
 
-        let input_data = url_encode(&serde_json::to_string(&input_json).unwrap());
+        let input_data = helpers::url_encode(&serde_json::to_string(&input_json).unwrap());
         let body = format!("input_data={}&input_format=json", input_data);
 
         let resp = http::post(
@@ -51,10 +54,14 @@ impl DnsProvider for Regru {
             body.as_bytes(),
             "application/x-www-form-urlencoded",
             &[],
-        ).map_err(|e| Error::Provider(format!("regru API: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("regru API: {e}")))?;
 
         if resp.body.contains("error") {
-            return Err(Error::Provider(format!("regru add_txt error: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "regru add_txt error: {}",
+                resp.body
+            )));
         }
         Ok(())
     }
@@ -76,7 +83,7 @@ impl DnsProvider for Regru {
             "output_content_type": "plain"
         });
 
-        let input_data = url_encode(&serde_json::to_string(&input_json).unwrap());
+        let input_data = helpers::url_encode(&serde_json::to_string(&input_json).unwrap());
         let body = format!("input_data={}&input_format=json", input_data);
 
         let resp = match http::post(
@@ -101,8 +108,8 @@ impl Regru {
     fn get_root(&self, fulldomain: &str) -> Result<(String, String), Error> {
         let body = format!(
             "username={}&password={}&output_format=xml&servtype=domain",
-            url_encode(&self.username),
-            url_encode(&self.password),
+            helpers::url_encode(&self.username),
+            helpers::url_encode(&self.password),
         );
 
         let resp = http::post(
@@ -110,10 +117,14 @@ impl Regru {
             body.as_bytes(),
             "application/x-www-form-urlencoded",
             &[],
-        ).map_err(|e| Error::Provider(format!("regru API: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("regru API: {e}")))?;
 
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("regru HTTP {}: {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "regru HTTP {}: {}",
+                resp.status, resp.body
+            )));
         }
 
         let domains = extract_dnames(&resp.body);
@@ -133,7 +144,9 @@ impl Regru {
             }
         }
 
-        Err(Error::Provider(format!("regru: cannot find zone for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "regru: cannot find zone for {fulldomain}"
+        )))
     }
 }
 
@@ -150,28 +163,4 @@ fn extract_dnames(xml: &str) -> Vec<String> {
         }
     }
     domains
-}
-
-fn url_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            b' ' => {
-                out.push('%');
-                out.push('2');
-                out.push('0');
-            }
-            _ => {
-                out.push('%');
-                out.push(hex_char((b >> 4) & 0xf));
-                out.push(hex_char(b & 0xf));
-            }
-        }
-    }
-    out
-}
-
-fn hex_char(n: u8) -> char {
-    if n < 10 { (b'0' + n) as char } else { (b'a' + n - 10) as char }
 }

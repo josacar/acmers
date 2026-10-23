@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -22,10 +22,12 @@ impl DnsProvider for Sitehost {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("SITEHOST_API_KEY")
+        let api_key = env
+            .get("SITEHOST_API_KEY")
             .ok_or_else(|| Error::Config("SITEHOST_API_KEY required".into()))?
             .clone();
-        let client_id = env.get("SITEHOST_CLIENT_ID")
+        let client_id = env
+            .get("SITEHOST_CLIENT_ID")
             .ok_or_else(|| Error::Config("SITEHOST_CLIENT_ID required".into()))?
             .clone();
         Ok(Box::new(Sitehost { api_key, client_id }))
@@ -46,7 +48,8 @@ impl DnsProvider for Sitehost {
             body.as_bytes(),
             "application/x-www-form-urlencoded",
             &[],
-        ).map_err(|e| Error::Provider(format!("SiteHost add TXT: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("SiteHost add TXT: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("SiteHost add TXT parse: {e}")))?;
         if !v.get("status").and_then(|s| s.as_bool()).unwrap_or(false) {
@@ -83,25 +86,28 @@ impl DnsProvider for Sitehost {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("content").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_body = format!(
-                            "apikey={}&client_id={}&domain={}&record_id={}",
-                            urlencode(&self.api_key),
-                            urlencode(&self.client_id),
-                            urlencode(&zone),
-                            urlencode(&id),
-                        );
-                        let _ = http::post(
-                            &format!("{API_BASE}/dns/delete_record.json"),
-                            del_body.as_bytes(),
-                            "application/x-www-form-urlencoded",
-                            &[],
-                        );
-                        return Ok(());
-                    }
+                    let del_body = format!(
+                        "apikey={}&client_id={}&domain={}&record_id={}",
+                        urlencode(&self.api_key),
+                        urlencode(&self.client_id),
+                        urlencode(&zone),
+                        urlencode(&id),
+                    );
+                    let _ = http::post(
+                        &format!("{API_BASE}/dns/delete_record.json"),
+                        del_body.as_bytes(),
+                        "application/x-www-form-urlencoded",
+                        &[],
+                    );
+                    return Ok(());
                 }
             }
         }
@@ -125,7 +131,10 @@ impl Sitehost {
             let v: Value = serde_json::from_str(&resp.body)
                 .map_err(|e| Error::Json(format!("SiteHost list domains parse: {e}")))?;
             if !v.get("status").and_then(|s| s.as_bool()).unwrap_or(false) {
-                return Err(Error::Provider(format!("SiteHost list domains: {}", resp.body)));
+                return Err(Error::Provider(format!(
+                    "SiteHost list domains: {}",
+                    resp.body
+                )));
             }
             if let Some(ret) = v.get("return") {
                 if let Some(arr) = ret.as_array() {
@@ -164,7 +173,9 @@ impl Sitehost {
                 return Ok(candidate);
             }
         }
-        Err(Error::Provider(format!("SiteHost: no zone found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "SiteHost: no zone found for {fulldomain}"
+        )))
     }
 }
 
@@ -172,7 +183,9 @@ fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }

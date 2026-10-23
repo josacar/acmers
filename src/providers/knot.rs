@@ -19,7 +19,9 @@ impl DnsProvider for Knot {
     }
 
     fn add_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Err(Error::Provider("Knot DNS uses DNS UPDATE protocol. Use nsupdate or the Knot web API.".into()))
+        Err(Error::Provider(
+            "Knot DNS uses DNS UPDATE protocol. Use nsupdate or the Knot web API.".into(),
+        ))
     }
 
     fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {

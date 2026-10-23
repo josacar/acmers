@@ -6,6 +6,7 @@ use ring::hmac;
 use crate::base64;
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Edgedns {
@@ -21,40 +22,66 @@ impl DnsProvider for Edgedns {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["AKAMAI_ACCESS_TOKEN", "AKAMAI_CLIENT_TOKEN", "AKAMAI_CLIENT_SECRET", "AKAMAI_HOST", "AKAMAI_EDGERC_CONTENT"]
+        &[
+            "AKAMAI_ACCESS_TOKEN",
+            "AKAMAI_CLIENT_TOKEN",
+            "AKAMAI_CLIENT_SECRET",
+            "AKAMAI_HOST",
+            "AKAMAI_EDGERC_CONTENT",
+        ]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let host = env.get("AKAMAI_HOST")
+        let host = env
+            .get("AKAMAI_HOST")
             .ok_or_else(|| Error::Config("AKAMAI_HOST required".into()))?
             .clone();
-        let access_token = env.get("AKAMAI_ACCESS_TOKEN")
+        let access_token = env
+            .get("AKAMAI_ACCESS_TOKEN")
             .ok_or_else(|| Error::Config("AKAMAI_ACCESS_TOKEN required".into()))?
             .clone();
-        let client_token = env.get("AKAMAI_CLIENT_TOKEN")
+        let client_token = env
+            .get("AKAMAI_CLIENT_TOKEN")
             .ok_or_else(|| Error::Config("AKAMAI_CLIENT_TOKEN required".into()))?
             .clone();
-        let client_secret = env.get("AKAMAI_CLIENT_SECRET")
+        let client_secret = env
+            .get("AKAMAI_CLIENT_SECRET")
             .ok_or_else(|| Error::Config("AKAMAI_CLIENT_SECRET required".into()))?
             .clone();
-        Ok(Box::new(Edgedns { host, access_token, client_token, client_secret }))
+        Ok(Box::new(Edgedns {
+            host,
+            access_token,
+            client_token,
+            client_secret,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
         let zone = self.resolve_zone(domain)?;
-        let record_url = format!("https://{}/config-dns/v2/zones/{}/names/{}/types/TXT", self.host, zone, name);
+        let record_url = format!(
+            "https://{}/config-dns/v2/zones/{}/names/{}/types/TXT",
+            self.host, zone, name
+        );
 
         let existing = self.api_get(&record_url);
         let (method, body) = match existing {
             Ok(resp) if resp.status == 200 => {
                 let v: serde_json::Value = serde_json::from_str(&resp.body)
                     .map_err(|e| Error::Json(format!("parse TXT record: {e}")))?;
-                let mut rdata: Vec<String> = v.get("rdata")
+                let mut rdata: Vec<String> = v
+                    .get("rdata")
                     .and_then(|r| r.as_array())
-                    .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
                     .unwrap_or_default();
-                let quoted = format!("\"{}\"", value);
-                if rdata.iter().any(|r| r == &quoted || r.trim_matches('"') == value) {
+                let quoted = helpers::txt_value(value);
+                if rdata
+                    .iter()
+                    .any(|r| r == &quoted || r.trim_matches('"') == value)
+                {
                     return Ok(());
                 }
                 rdata.push(quoted);
@@ -71,7 +98,7 @@ impl DnsProvider for Edgedns {
                     "name": name,
                     "type": "TXT",
                     "ttl": 600,
-                    "rdata": [format!("\"{}\"", value)],
+                    "rdata": [helpers::txt_value(value)],
                 });
                 ("POST", serde_json::to_string(&body).unwrap())
             }
@@ -79,7 +106,10 @@ impl DnsProvider for Edgedns {
 
         let resp = self.api_request(method, &record_url, Some(body.as_bytes()))?;
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("EdgeDNS add TXT: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "EdgeDNS add TXT: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -89,7 +119,10 @@ impl DnsProvider for Edgedns {
             Ok(z) => z,
             Err(_) => return Ok(()),
         };
-        let record_url = format!("https://{}/config-dns/v2/zones/{}/names/{}/types/TXT", self.host, zone, name);
+        let record_url = format!(
+            "https://{}/config-dns/v2/zones/{}/names/{}/types/TXT",
+            self.host, zone, name
+        );
 
         let existing = match self.api_get(&record_url) {
             Ok(resp) if resp.status == 200 => resp,
@@ -98,13 +131,19 @@ impl DnsProvider for Edgedns {
 
         let v: serde_json::Value = serde_json::from_str(&existing.body)
             .map_err(|e| Error::Json(format!("parse TXT record: {e}")))?;
-        let rdata: Vec<String> = v.get("rdata")
+        let rdata: Vec<String> = v
+            .get("rdata")
             .and_then(|r| r.as_array())
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
             .unwrap_or_default();
 
-        let quoted = format!("\"{}\"", value);
-        let remaining: Vec<String> = rdata.into_iter()
+        let quoted = helpers::txt_value(value);
+        let remaining: Vec<String> = rdata
+            .into_iter()
             .filter(|r| r != &quoted && r.trim_matches('"') != value)
             .collect();
 
@@ -117,11 +156,18 @@ impl DnsProvider for Edgedns {
                 "ttl": 600,
                 "rdata": remaining,
             });
-            self.api_request("PUT", &record_url, Some(serde_json::to_string(&body).unwrap().as_bytes()))?
+            self.api_request(
+                "PUT",
+                &record_url,
+                Some(serde_json::to_string(&body).unwrap().as_bytes()),
+            )?
         };
 
         if resp.status >= 300 && resp.status != 404 {
-            return Err(Error::Provider(format!("EdgeDNS remove TXT: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "EdgeDNS remove TXT: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -162,7 +208,12 @@ impl Edgedns {
         self.api_request("DELETE", url, None)
     }
 
-    fn api_request(&self, method: &str, url: &str, body: Option<&[u8]>) -> Result<http::Response, Error> {
+    fn api_request(
+        &self,
+        method: &str,
+        url: &str,
+        body: Option<&[u8]>,
+    ) -> Result<http::Response, Error> {
         let path = extract_path(url);
         let timestamp = edge_timestamp();
         let nonce = edge_nonce(&timestamp);
@@ -173,7 +224,7 @@ impl Edgedns {
         );
 
         let content_hash = if method == "POST" {
-            body.map(|b| base64_sha256(b)).unwrap_or_default()
+            body.map(base64_sha256).unwrap_or_default()
         } else {
             String::new()
         };
@@ -194,9 +245,10 @@ impl Edgedns {
             ("Authorization", auth_header.as_str()),
         ];
 
-        let resp = match method {
-            "GET" => http::get(url, &headers)
-                .map_err(|e| Error::Provider(format!("EdgeDNS GET: {e}"))),
+        match method {
+            "GET" => {
+                http::get(url, &headers).map_err(|e| Error::Provider(format!("EdgeDNS GET: {e}")))
+            }
             "POST" => {
                 headers.push(("Content-Type", "application/json"));
                 let b = body.unwrap_or(&[]);
@@ -212,8 +264,7 @@ impl Edgedns {
             "DELETE" => http::delete(url, &headers)
                 .map_err(|e| Error::Provider(format!("EdgeDNS DELETE: {e}"))),
             _ => Err(Error::Provider(format!("unsupported method: {method}"))),
-        };
-        resp
+        }
     }
 }
 

@@ -1,8 +1,9 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Edgecenter {
@@ -19,7 +20,8 @@ impl DnsProvider for Edgecenter {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("EDGECENTER_API_KEY")
+        let api_key = env
+            .get("EDGECENTER_API_KEY")
             .ok_or_else(|| Error::Config("EDGECENTER_API_KEY required".into()))?
             .clone();
         Ok(Box::new(Edgecenter { api_key }))
@@ -29,18 +31,22 @@ impl DnsProvider for Edgecenter {
         let auth = format!("APIKey {}", self.api_key);
         let headers: &[(&str, &str)] = &[("Authorization", &auth)];
         let zone_id = self.resolve_zone(domain, headers)?;
-        let quoted_value = format!("\"{value}\"");
+        let quoted_value = helpers::txt_value(value);
         let body = serde_json::to_vec(&serde_json::json!({
             "name": name,
             "type": "TXT",
             "records": [{"content": [&quoted_value]}],
             "ttl": 120,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.edgecenter.ru/dns/v2/zones/{zone_id}/rrsets");
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("EdgeCenter add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("EdgeCenter add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "EdgeCenter add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -66,12 +72,16 @@ impl Edgecenter {
             .map_err(|e| Error::Json(format!("EdgeCenter zones: {e}")))?;
         if let Some(zones) = v.as_array() {
             for zone in zones {
-                if zone.get("name").and_then(|n| n.as_str()) == Some(domain) {
-                    if let Some(id) = zone.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        return Ok(id);
-                    }
+                if zone.get("name").and_then(|n| n.as_str()) == Some(domain)
+                    && let Some(id) = zone.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
+                {
+                    return Ok(id);
                 }
             }
         }

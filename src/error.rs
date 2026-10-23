@@ -3,10 +3,17 @@ use std::fmt;
 #[derive(Debug)]
 pub enum Error {
     Io(std::io::Error),
-    Http { status: u16, body: String },
+    Http {
+        status: u16,
+        body: String,
+    },
     Json(String),
     Crypto(String),
-    Acme { status: u16, detail: String, error_type: String },
+    Acme {
+        status: u16,
+        detail: String,
+        error_type: String,
+    },
     Config(String),
     Provider(String),
     Dns(String),
@@ -21,7 +28,11 @@ impl fmt::Display for Error {
             Error::Http { status, body } => write!(f, "HTTP {status}: {body}"),
             Error::Json(e) => write!(f, "JSON: {e}"),
             Error::Crypto(e) => write!(f, "crypto: {e}"),
-            Error::Acme { status, detail, error_type } => {
+            Error::Acme {
+                status,
+                detail,
+                error_type,
+            } => {
                 write!(f, "ACME [{error_type}] ({status}): {detail}")
             }
             Error::Config(e) => write!(f, "config: {e}"),
@@ -36,9 +47,13 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self { Error::Io(e) }
+    fn from(e: std::io::Error) -> Self {
+        Error::Io(e)
+    }
 }
 
 impl From<std::str::Utf8Error> for Error {
-    fn from(_: std::str::Utf8Error) -> Self { Error::Utf8 }
+    fn from(_: std::str::Utf8Error) -> Self {
+        Error::Utf8
+    }
 }

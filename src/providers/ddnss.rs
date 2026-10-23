@@ -5,8 +5,14 @@ use crate::http;
 use crate::providers::{DnsProvider, ProviderResult};
 
 const SUFFIXES: &[&str] = &[
-    "ddnss", "dyn-ip24", "dyndns", "dyn", "dyndns1",
-    "home-webserver", "myhome-server", "dynip",
+    "ddnss",
+    "dyn-ip24",
+    "dyndns",
+    "dyn",
+    "dyndns1",
+    "home-webserver",
+    "myhome-server",
+    "dynip",
 ];
 
 pub struct Ddnss {
@@ -36,7 +42,8 @@ impl DnsProvider for Ddnss {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("DDNSS_Token")
+        let token = env
+            .get("DDNSS_Token")
             .ok_or_else(|| Error::Config("DDNSS_Token required".into()))?
             .clone();
         Ok(Box::new(Ddnss { token }))
@@ -48,8 +55,8 @@ impl DnsProvider for Ddnss {
             "https://ddnss.de/upd.php?key={}&host={}&txtm=1&txt={}",
             self.token, ddnss_domain, value
         );
-        let resp = http::get(&url, &[])
-            .map_err(|e| Error::Provider(format!("ddnss add TXT: {e}")))?;
+        let resp =
+            http::get(&url, &[]).map_err(|e| Error::Provider(format!("ddnss add TXT: {e}")))?;
         let body = resp.body.trim();
         if !body.contains("Updated") {
             return Err(Error::Provider(format!(

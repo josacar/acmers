@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 const JOKER_API: &str = "https://svc.joker.com/nic/replace";
@@ -21,10 +22,14 @@ impl DnsProvider for Joker {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("JOKER_USERNAME")
-            .ok_or_else(|| Error::Config("JOKER_USERNAME required".into()))?.clone();
-        let password = env.get("JOKER_PASSWORD")
-            .ok_or_else(|| Error::Config("JOKER_PASSWORD required".into()))?.clone();
+        let username = env
+            .get("JOKER_USERNAME")
+            .ok_or_else(|| Error::Config("JOKER_USERNAME required".into()))?
+            .clone();
+        let password = env
+            .get("JOKER_PASSWORD")
+            .ok_or_else(|| Error::Config("JOKER_PASSWORD required".into()))?
+            .clone();
         Ok(Box::new(Joker { username, password }))
     }
 
@@ -32,14 +37,19 @@ impl DnsProvider for Joker {
         let (zone, label) = self.get_root(name)?;
         let form = format!(
             "username={}&password={}&zone={}&label={}&type=TXT&value={}",
-            url_encode(&self.username),
-            url_encode(&self.password),
-            url_encode(&zone),
-            url_encode(&label),
-            url_encode(value),
+            helpers::url_encode_form(&self.username),
+            helpers::url_encode_form(&self.password),
+            helpers::url_encode_form(&zone),
+            helpers::url_encode_form(&label),
+            helpers::url_encode_form(value),
         );
-        let resp = http::post(JOKER_API, form.as_bytes(), "application/x-www-form-urlencoded", &[])
-            .map_err(|e| Error::Provider(format!("joker add TXT: {e}")))?;
+        let resp = http::post(
+            JOKER_API,
+            form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[],
+        )
+        .map_err(|e| Error::Provider(format!("joker add TXT: {e}")))?;
         if !resp.body.starts_with("OK") {
             return Err(Error::Provider(format!("joker add TXT: {}", resp.body)));
         }
@@ -50,13 +60,18 @@ impl DnsProvider for Joker {
         let (zone, label) = self.get_root(name)?;
         let form = format!(
             "username={}&password={}&zone={}&label={}&type=TXT&value=",
-            url_encode(&self.username),
-            url_encode(&self.password),
-            url_encode(&zone),
-            url_encode(&label),
+            helpers::url_encode_form(&self.username),
+            helpers::url_encode_form(&self.password),
+            helpers::url_encode_form(&zone),
+            helpers::url_encode_form(&label),
         );
-        let resp = http::post(JOKER_API, form.as_bytes(), "application/x-www-form-urlencoded", &[])
-            .map_err(|e| Error::Provider(format!("joker remove TXT: {e}")))?;
+        let resp = http::post(
+            JOKER_API,
+            form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[],
+        )
+        .map_err(|e| Error::Provider(format!("joker remove TXT: {e}")))?;
         if !resp.body.starts_with("OK") {
             eprintln!("warning: joker remove TXT: {}", resp.body);
         }
@@ -74,41 +89,27 @@ impl Joker {
             }
             let form = format!(
                 "username={}&password={}&zone={}&label=jokerTXTUpdateTest&type=TXT&value=",
-                url_encode(&self.username),
-                url_encode(&self.password),
-                url_encode(&candidate),
+                helpers::url_encode_form(&self.username),
+                helpers::url_encode_form(&self.password),
+                helpers::url_encode_form(&candidate),
             );
-            if let Ok(resp) = http::post(JOKER_API, form.as_bytes(), "application/x-www-form-urlencoded", &[]) {
-                if resp.body.starts_with("OK") {
-                    let sub_domain = if i == 0 {
-                        String::new()
-                    } else {
-                        parts[..i].join(".")
-                    };
-                    return Ok((candidate, sub_domain));
-                }
+            if let Ok(resp) = http::post(
+                JOKER_API,
+                form.as_bytes(),
+                "application/x-www-form-urlencoded",
+                &[],
+            ) && resp.body.starts_with("OK")
+            {
+                let sub_domain = if i == 0 {
+                    String::new()
+                } else {
+                    parts[..i].join(".")
+                };
+                return Ok((candidate, sub_domain));
             }
         }
-        Err(Error::Provider(format!("joker: root domain not found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "joker: root domain not found for {fulldomain}"
+        )))
     }
-}
-
-fn url_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            b' ' => out.push('+'),
-            _ => {
-                out.push('%');
-                out.push(hex_char((b >> 4) & 0xf));
-                out.push(hex_char(b & 0xf));
-            }
-        }
-    }
-    out
-}
-
-fn hex_char(n: u8) -> char {
-    if n < 10 { (b'0' + n) as char } else { (b'a' + n - 10) as char }
 }

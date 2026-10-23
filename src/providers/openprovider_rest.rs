@@ -1,8 +1,9 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct OpenproviderRest {
@@ -20,10 +21,12 @@ impl DnsProvider for OpenproviderRest {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("OPENPROVIDER_REST_USERNAME")
+        let username = env
+            .get("OPENPROVIDER_REST_USERNAME")
             .ok_or_else(|| Error::Config("OPENPROVIDER_REST_USERNAME required".into()))?
             .clone();
-        let password = env.get("OPENPROVIDER_REST_PASSWORD")
+        let password = env
+            .get("OPENPROVIDER_REST_PASSWORD")
             .ok_or_else(|| Error::Config("OPENPROVIDER_REST_PASSWORD required".into()))?
             .clone();
         Ok(Box::new(OpenproviderRest { username, password }))
@@ -44,15 +47,22 @@ impl DnsProvider for OpenproviderRest {
                     "value": value,
                 }]
             }
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.openprovider.eu/v1beta/dns/zones/{domain_name}");
         let resp = http::put(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("OpenProvider add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("OpenProvider add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "OpenProvider add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         if !resp.body.contains("\"success\":true") && !resp.body.contains("\"Duplicate record\"") {
-            return Err(Error::Provider(format!("OpenProvider add TXT: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "OpenProvider add TXT: {}",
+                resp.body
+            )));
         }
         Ok(())
     }
@@ -67,7 +77,7 @@ impl DnsProvider for OpenproviderRest {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let quoted_value = format!("\"{}\"", value);
+        let quoted_value = helpers::txt_value(value);
         let body = serde_json::to_vec(&serde_json::json!({
             "id": domain_id,
             "name": domain_name,
@@ -79,7 +89,8 @@ impl DnsProvider for OpenproviderRest {
                     "value": quoted_value,
                 }]
             }
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.openprovider.eu/v1beta/dns/zones/{domain_name}");
         let resp = match http::put(&url, &body, "application/json", headers) {
             Ok(r) => r,
@@ -98,11 +109,21 @@ impl OpenproviderRest {
             "ip": "0.0.0.0",
             "password": self.password,
             "username": self.username,
-        })).unwrap();
-        let resp = http::post("https://api.openprovider.eu/v1beta/auth/login", &body, "application/json", &[("Accept", "application/json")])
-            .map_err(|e| Error::Provider(format!("OpenProvider auth: {e}")))?;
-        let token = extract_token(&resp.body)
-            .ok_or_else(|| Error::Provider(format!("OpenProvider auth: no token in response: {}", resp.body)))?;
+        }))
+        .unwrap();
+        let resp = http::post(
+            "https://api.openprovider.eu/v1beta/auth/login",
+            &body,
+            "application/json",
+            &[("Accept", "application/json")],
+        )
+        .map_err(|e| Error::Provider(format!("OpenProvider auth: {e}")))?;
+        let token = extract_token(&resp.body).ok_or_else(|| {
+            Error::Provider(format!(
+                "OpenProvider auth: no token in response: {}",
+                resp.body
+            ))
+        })?;
         Ok(format!("Bearer {token}"))
     }
 
@@ -120,7 +141,8 @@ impl OpenproviderRest {
             if resp.body.contains(&format!("\"name\":\"{}\"", h)) {
                 let v: Value = serde_json::from_str(&resp.body)
                     .map_err(|e| Error::Json(format!("OpenProvider zone lookup: {e}")))?;
-                let id = v.pointer("/data/0/id")
+                let id = v
+                    .pointer("/data/0/id")
                     .or_else(|| v.get("data").and_then(|d| d.get("id")))
                     .cloned()
                     .unwrap_or(Value::Null);
@@ -128,7 +150,10 @@ impl OpenproviderRest {
                 return Ok((id, h, sub_domain));
             }
         }
-        Err(Error::Provider(format!("OpenProvider: DNS zone not found for {}", domain)))
+        Err(Error::Provider(format!(
+            "OpenProvider: DNS zone not found for {}",
+            domain
+        )))
     }
 }
 

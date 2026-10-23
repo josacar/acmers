@@ -18,7 +18,8 @@ impl DnsProvider for Duckdns {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("DuckDNS_Token")
+        let token = env
+            .get("DuckDNS_Token")
             .ok_or_else(|| Error::Config("DuckDNS_Token required".into()))?
             .clone();
         Ok(Box::new(Duckdns { token }))
@@ -29,8 +30,7 @@ impl DnsProvider for Duckdns {
             "https://www.duckdns.org/update?domains={domain}&token={}&txt={value}",
             self.token,
         );
-        http::get(&url, &[])
-            .map_err(|e| Error::Provider(format!("DuckDNS update: {e}")))?;
+        http::get(&url, &[]).map_err(|e| Error::Provider(format!("DuckDNS update: {e}")))?;
         Ok(())
     }
 

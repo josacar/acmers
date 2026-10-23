@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,8 +19,10 @@ impl DnsProvider for Netlify {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("NETLIFY_ACCESS_TOKEN")
-            .ok_or_else(|| Error::Config("NETLIFY_ACCESS_TOKEN required".into()))?.clone();
+        let token = env
+            .get("NETLIFY_ACCESS_TOKEN")
+            .ok_or_else(|| Error::Config("NETLIFY_ACCESS_TOKEN required".into()))?
+            .clone();
         Ok(Box::new(Netlify { token }))
     }
 
@@ -34,8 +36,13 @@ impl DnsProvider for Netlify {
             "ttl": 120,
         });
         let auth = format!("Bearer {}", self.token);
-        http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("netlify add TXT: {e}")))?;
+        http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("netlify add TXT: {e}")))?;
         Ok(())
     }
 
@@ -43,7 +50,8 @@ impl DnsProvider for Netlify {
         let zone_id = self.resolve_zone(domain)?;
         let record_id = self.find_record_id(&zone_id, name)?;
         if let Some(id) = record_id {
-            let url = format!("https://api.netlify.com/api/v1/dns_zones/{zone_id}/dns_records/{id}");
+            let url =
+                format!("https://api.netlify.com/api/v1/dns_zones/{zone_id}/dns_records/{id}");
             let auth = format!("Bearer {}", self.token);
             http::delete(&url, &[("Authorization", &auth)])
                 .map_err(|e| Error::Provider(format!("netlify delete TXT: {e}")))?;
@@ -55,18 +63,20 @@ impl DnsProvider for Netlify {
 impl Netlify {
     fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
         let auth = format!("Bearer {}", self.token);
-        let resp = http::get("https://api.netlify.com/api/v1/dns_zones", &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("netlify list zones: {e}")))?;
+        let resp = http::get(
+            "https://api.netlify.com/api/v1/dns_zones",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("netlify list zones: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("netlify zones: {e}")))?;
         if let Some(arr) = v.as_array() {
             for z in arr {
-                if let Some(nm) = z.get("name").and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        if let Some(id) = z.get("id").and_then(|i| i.as_str()) {
-                            return Ok(id.to_string());
-                        }
-                    }
+                if let Some(nm) = z.get("name").and_then(|n| n.as_str())
+                    && (domain == nm || domain.ends_with(&format!(".{nm}")))
+                    && let Some(id) = z.get("id").and_then(|i| i.as_str())
+                {
+                    return Ok(id.to_string());
                 }
             }
         }
@@ -84,10 +94,9 @@ impl Netlify {
             for r in arr {
                 if r.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && r.get("hostname").and_then(|h| h.as_str()) == Some(name)
+                    && let Some(id) = r.get("id").and_then(|i| i.as_str())
                 {
-                    if let Some(id) = r.get("id").and_then(|i| i.as_str()) {
-                        return Ok(Some(id.to_string()));
-                    }
+                    return Ok(Some(id.to_string()));
                 }
             }
         }

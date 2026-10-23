@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -20,10 +20,14 @@ impl DnsProvider for Rackspace {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("RACKSPACE_Username")
-            .ok_or_else(|| Error::Config("RACKSPACE_Username required".into()))?.clone();
-        let api_key = env.get("RACKSPACE_ApiKey")
-            .ok_or_else(|| Error::Config("RACKSPACE_ApiKey required".into()))?.clone();
+        let username = env
+            .get("RACKSPACE_Username")
+            .ok_or_else(|| Error::Config("RACKSPACE_Username required".into()))?
+            .clone();
+        let api_key = env
+            .get("RACKSPACE_ApiKey")
+            .ok_or_else(|| Error::Config("RACKSPACE_ApiKey required".into()))?
+            .clone();
         Ok(Box::new(Rackspace { username, api_key }))
     }
 
@@ -37,12 +41,16 @@ impl DnsProvider for Rackspace {
             "type": "TXT",
             "data": value,
             "ttl": 120,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("{}/domains/{}/records", base, domain_id);
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("Rackspace add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Rackspace add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Rackspace add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -94,40 +102,53 @@ impl Rackspace {
                     "apiKey": self.api_key,
                 }
             }
-        })).unwrap();
+        }))
+        .unwrap();
         let resp = http::post(
             "https://identity.api.rackspacecloud.com/v2.0/tokens",
             &body,
             "application/json",
-            &[]
-        ).map_err(|e| Error::Provider(format!("Rackspace auth: {e}")))?;
+            &[],
+        )
+        .map_err(|e| Error::Provider(format!("Rackspace auth: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Rackspace auth: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Rackspace auth: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Rackspace auth: {e}")))?;
         let token = crate::json::get_string_required(&v, &["access", "token", "id"])?.to_string();
-        let tenant = crate::json::get_string_required(&v, &["access", "token", "tenant", "id"])?.to_string();
+        let tenant =
+            crate::json::get_string_required(&v, &["access", "token", "tenant", "id"])?.to_string();
         Ok((token, tenant))
     }
 
-    fn resolve_zone(&self, domain: &str, base: &str, headers: &[(&str, &str)]) -> Result<String, Error> {
+    fn resolve_zone(
+        &self,
+        domain: &str,
+        base: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<String, Error> {
         let url = format!("{}/domains", base);
         let resp = http::get(&url, headers)
             .map_err(|e| Error::Provider(format!("Rackspace list domains: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Rackspace list domains: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Rackspace list domains: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Rackspace domains: {e}")))?;
         if let Some(domains) = v.get("domains").and_then(|d| d.as_array()) {
             for d in domains {
-                if let Some(nm) = d.get("name").and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        if let Some(id) = d.get("id").and_then(|i| i.as_i64()) {
-                            return Ok(id.to_string());
-                        }
-                    }
+                if let Some(nm) = d.get("name").and_then(|n| n.as_str())
+                    && (domain == nm || domain.ends_with(&format!(".{nm}")))
+                    && let Some(id) = d.get("id").and_then(|i| i.as_i64())
+                {
+                    return Ok(id.to_string());
                 }
             }
         }

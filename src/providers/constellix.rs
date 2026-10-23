@@ -25,11 +25,18 @@ impl DnsProvider for Constellix {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("CONSTELLIX_Key")
-            .ok_or_else(|| Error::Config("CONSTELLIX_Key required".into()))?.clone();
-        let api_secret = env.get("CONSTELLIX_Secret")
-            .ok_or_else(|| Error::Config("CONSTELLIX_Secret required".into()))?.clone();
-        Ok(Box::new(Constellix { api_key, api_secret }))
+        let api_key = env
+            .get("CONSTELLIX_Key")
+            .ok_or_else(|| Error::Config("CONSTELLIX_Key required".into()))?
+            .clone();
+        let api_secret = env
+            .get("CONSTELLIX_Secret")
+            .ok_or_else(|| Error::Config("CONSTELLIX_Secret required".into()))?
+            .clone();
+        Ok(Box::new(Constellix {
+            api_key,
+            api_secret,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -46,11 +53,22 @@ impl DnsProvider for Constellix {
         }]);
         let url = format!("{BASE_URL}/domains/{domain_id}/records");
         let headers = self.auth_headers();
-        let header_refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &header_refs)
-            .map_err(|e| Error::Provider(format!("constellix add TXT: {e}")))?;
+        let header_refs: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &header_refs,
+        )
+        .map_err(|e| Error::Provider(format!("constellix add TXT: {e}")))?;
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("constellix add TXT: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "constellix add TXT: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -72,8 +90,16 @@ impl DnsProvider for Constellix {
         }]);
         let url = format!("{BASE_URL}/domains/{domain_id}/records");
         let headers = self.auth_headers();
-        let header_refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
-        let _ = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &header_refs);
+        let header_refs: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        let _ = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &header_refs,
+        );
         Ok(())
     }
 }
@@ -85,7 +111,10 @@ impl Constellix {
             .unwrap()
             .as_millis()
             .to_string();
-        let signing_key = hmac::Key::new(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, self.api_secret.as_bytes());
+        let signing_key = hmac::Key::new(
+            hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
+            self.api_secret.as_bytes(),
+        );
         let tag = hmac::sign(&signing_key, ts.as_bytes());
         let hmac_b64 = base64::encode_std(tag.as_ref());
         vec![
@@ -99,7 +128,10 @@ impl Constellix {
         std::thread::sleep(std::time::Duration::from_secs(2));
         let url = format!("{BASE_URL}/{endpoint}");
         let headers = self.auth_headers();
-        let header_refs: Vec<(&str, &str)> = headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let header_refs: Vec<(&str, &str)> = headers
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
         http::get(&url, &header_refs)
             .map_err(|e| Error::Provider(format!("constellix GET {endpoint}: {e}")))
     }
@@ -120,15 +152,23 @@ impl Constellix {
                 Ok(v) => v,
                 Err(_) => continue,
             };
-            if v.get("name").and_then(|n| n.as_str()) == Some(h.as_str()) {
-                if let Some(id) = v.get("id").and_then(|id| id.as_i64()).map(|id| id.to_string())
-                    .or_else(|| v.get("id").and_then(|id| id.as_str()).map(|s| s.to_string()))
-                {
-                    let sub_domain = parts[..i].join(".");
-                    return Ok((id, sub_domain));
-                }
+            if v.get("name").and_then(|n| n.as_str()) == Some(h.as_str())
+                && let Some(id) = v
+                    .get("id")
+                    .and_then(|id| id.as_i64())
+                    .map(|id| id.to_string())
+                    .or_else(|| {
+                        v.get("id")
+                            .and_then(|id| id.as_str())
+                            .map(|s| s.to_string())
+                    })
+            {
+                let sub_domain = parts[..i].join(".");
+                return Ok((id, sub_domain));
             }
         }
-        Err(Error::Provider(format!("constellix zone not found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "constellix zone not found for {fulldomain}"
+        )))
     }
 }

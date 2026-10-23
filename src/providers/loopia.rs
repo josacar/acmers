@@ -21,10 +21,12 @@ impl DnsProvider for Loopia {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let user = env.get("LOOPIA_User")
+        let user = env
+            .get("LOOPIA_User")
             .ok_or_else(|| Error::Config("LOOPIA_User required".into()))?
             .clone();
-        let pass = env.get("LOOPIA_Password")
+        let pass = env
+            .get("LOOPIA_Password")
             .ok_or_else(|| Error::Config("LOOPIA_Password required".into()))?
             .clone();
         Ok(Box::new(Loopia { user, pass }))
@@ -40,17 +42,23 @@ impl DnsProvider for Loopia {
       <member><name>priority</name><value><int>0</int></value></member>"#,
             v = xml_escape(value)
         );
-        let xml = xmlrpc_call("addZoneRecord", &[
-            XmlRpcParam::String(self.user.clone()),
-            XmlRpcParam::String(self.pass.clone()),
-            XmlRpcParam::String(record_domain),
-            XmlRpcParam::String(record_subdomain),
-            XmlRpcParam::Struct(record),
-        ]);
+        let xml = xmlrpc_call(
+            "addZoneRecord",
+            &[
+                XmlRpcParam::String(self.user.clone()),
+                XmlRpcParam::String(self.pass.clone()),
+                XmlRpcParam::String(record_domain),
+                XmlRpcParam::String(record_subdomain),
+                XmlRpcParam::Struct(record),
+            ],
+        );
         let resp = http::post(BASE_URL, xml.as_bytes(), "text/xml", &[])
             .map_err(|e| Error::Provider(format!("loopia addZoneRecord: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("loopia addZoneRecord: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "loopia addZoneRecord: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         check_fault(&resp.body)?;
         Ok(())
@@ -67,13 +75,16 @@ impl DnsProvider for Loopia {
             Ok(None) => return Ok(()),
             Err(_) => return Ok(()),
         };
-        let xml = xmlrpc_call("removeZoneRecord", &[
-            XmlRpcParam::String(self.user.clone()),
-            XmlRpcParam::String(self.pass.clone()),
-            XmlRpcParam::String(record_domain),
-            XmlRpcParam::String(record_subdomain),
-            XmlRpcParam::Int(record_id),
-        ]);
+        let xml = xmlrpc_call(
+            "removeZoneRecord",
+            &[
+                XmlRpcParam::String(self.user.clone()),
+                XmlRpcParam::String(self.pass.clone()),
+                XmlRpcParam::String(record_domain),
+                XmlRpcParam::String(record_subdomain),
+                XmlRpcParam::Int(record_id),
+            ],
+        );
         let resp = http::post(BASE_URL, xml.as_bytes(), "text/xml", &[])
             .map_err(|e| Error::Provider(format!("loopia removeZoneRecord: {e}")))?;
         if resp.status >= 400 {
@@ -111,7 +122,10 @@ impl Loopia {
         let resp = http::post(BASE_URL, xml.as_bytes(), "text/xml", &[])
             .map_err(|e| Error::Provider(format!("loopia getDomains: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("loopia getDomains: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "loopia getDomains: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         check_fault(&resp.body)?;
         let domains = extract_all_strings_in_array(&resp.body);
@@ -129,34 +143,45 @@ impl Loopia {
                 return Ok(d.clone());
             }
         }
-        Err(Error::Provider(format!("loopia: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "loopia: zone not found for {domain}"
+        )))
     }
 
-    fn find_record_id(&self, _zone: &str, record_domain: &str, record_subdomain: &str, value: &str) -> Result<Option<i64>, Error> {
-        let xml = xmlrpc_call("getZoneRecords", &[
-            XmlRpcParam::String(self.user.clone()),
-            XmlRpcParam::String(self.pass.clone()),
-            XmlRpcParam::String(record_domain.to_string()),
-            XmlRpcParam::String(record_subdomain.to_string()),
-        ]);
+    fn find_record_id(
+        &self,
+        _zone: &str,
+        record_domain: &str,
+        record_subdomain: &str,
+        value: &str,
+    ) -> Result<Option<i64>, Error> {
+        let xml = xmlrpc_call(
+            "getZoneRecords",
+            &[
+                XmlRpcParam::String(self.user.clone()),
+                XmlRpcParam::String(self.pass.clone()),
+                XmlRpcParam::String(record_domain.to_string()),
+                XmlRpcParam::String(record_subdomain.to_string()),
+            ],
+        );
         let resp = http::post(BASE_URL, xml.as_bytes(), "text/xml", &[])
             .map_err(|e| Error::Provider(format!("loopia getZoneRecords: {e}")))?;
         if resp.status >= 400 {
             return Ok(None);
         }
-        if let Err(_) = check_fault(&resp.body) {
+        if check_fault(&resp.body).is_err() {
             return Ok(None);
         }
         let members = extract_all_members(&resp.body);
         for member in &members {
             let rec_type = extract_value_in(member, "member", "type");
             let rec_rdata = extract_value_in(member, "member", "rdata");
-            if rec_type.as_deref() == Some("TXT") && rec_rdata.as_deref() == Some(value) {
-                if let Some(id_str) = extract_value_in(member, "member", "record_id") {
-                    if let Ok(id) = id_str.parse::<i64>() {
-                        return Ok(Some(id));
-                    }
-                }
+            if rec_type.as_deref() == Some("TXT")
+                && rec_rdata.as_deref() == Some(value)
+                && let Some(id_str) = extract_value_in(member, "member", "record_id")
+                && let Ok(id) = id_str.parse::<i64>()
+            {
+                return Ok(Some(id));
             }
         }
         Ok(None)
@@ -189,9 +214,7 @@ fn xmlrpc_call(method: &str, params: &[XmlRpcParam]) -> String {
                 ));
             }
             XmlRpcParam::Int(i) => {
-                params_xml.push_str(&format!(
-                    r#"<param><value><int>{i}</int></value></param>"#
-                ));
+                params_xml.push_str(&format!(r#"<param><value><int>{i}</int></value></param>"#));
             }
             XmlRpcParam::Struct(body) => {
                 params_xml.push_str(&format!(

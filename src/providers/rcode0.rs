@@ -1,8 +1,9 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 const DEFAULT_URL: &str = "https://my.rcodezero.at";
@@ -24,16 +25,23 @@ impl DnsProvider for Rcode0 {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("RCODE0_API_TOKEN")
+        let token = env
+            .get("RCODE0_API_TOKEN")
             .ok_or_else(|| Error::Config("RCODE0_API_TOKEN required".into()))?
             .clone();
-        let base_url = env.get("RCODE0_URL")
+        let base_url = env
+            .get("RCODE0_URL")
             .map(|s| s.trim_end_matches('/').to_string())
             .unwrap_or_else(|| DEFAULT_URL.to_string());
-        let ttl = env.get("RCODE0_TTL")
+        let ttl = env
+            .get("RCODE0_TTL")
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_TTL);
-        Ok(Box::new(Rcode0 { token, base_url, ttl }))
+        Ok(Box::new(Rcode0 {
+            token,
+            base_url,
+            ttl,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -54,13 +62,17 @@ impl DnsProvider for Rcode0 {
             "type": "TXT",
             "ttl": self.ttl,
             "records": records,
-        }])).unwrap();
+        }]))
+        .unwrap();
 
         let url = format!("{}/api/v1/acme/zones/{}/rrsets", self.base_url, zone);
         let resp = http::patch(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("rcode0 add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("rcode0 add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "rcode0 add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -85,12 +97,16 @@ impl DnsProvider for Rcode0 {
             "changetype": "delete",
             "name": format!("{name}."),
             "type": "TXT",
-        }])).unwrap();
+        }]))
+        .unwrap();
         let url = format!("{}/api/v1/acme/zones/{}/rrsets", self.base_url, zone);
         let resp = http::patch(&url, &del_body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("rcode0 del TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("rcode0 del TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "rcode0 del TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
 
         let remaining: Vec<&String> = existing.iter().filter(|c| c.as_str() != value).collect();
@@ -105,11 +121,15 @@ impl DnsProvider for Rcode0 {
                 "type": "TXT",
                 "ttl": self.ttl,
                 "records": records,
-            }])).unwrap();
+            }]))
+            .unwrap();
             let resp = http::patch(&url, &upd_body, "application/json", headers)
                 .map_err(|e| Error::Provider(format!("rcode0 upd TXT: {e}")))?;
             if resp.status >= 400 {
-                return Err(Error::Provider(format!("rcode0 upd TXT: HTTP {} {}", resp.status, resp.body)));
+                return Err(Error::Provider(format!(
+                    "rcode0 upd TXT: HTTP {} {}",
+                    resp.status, resp.body
+                )));
             }
         }
         Ok(())
@@ -119,7 +139,7 @@ impl DnsProvider for Rcode0 {
 impl Rcode0 {
     fn build_record(&self, value: &str) -> Value {
         serde_json::json!({
-            "content": format!("\"{}\"", value),
+            "content": helpers::txt_value(value),
             "disabled": false,
         })
     }
@@ -141,10 +161,17 @@ impl Rcode0 {
                 return Err(Error::Provider(format!("rcode0: not a master domain: {h}")));
             }
         }
-        Err(Error::Provider(format!("rcode0: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "rcode0: zone not found for {domain}"
+        )))
     }
 
-    fn list_existing_challenges(&self, zone: &str, fulldomain: &str, headers: &[(&str, &str)]) -> Result<Vec<String>, Error> {
+    fn list_existing_challenges(
+        &self,
+        zone: &str,
+        fulldomain: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<Vec<String>, Error> {
         let url = format!("{}/api/v1/acme/zones/{}/rrsets", self.base_url, zone);
         let resp = http::get(&url, headers)
             .map_err(|e| Error::Provider(format!("rcode0 list rrsets: {e}")))?;
@@ -155,14 +182,13 @@ impl Rcode0 {
             for rrset in rrsets {
                 if rrset.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && rrset.get("name").and_then(|n| n.as_str()) == Some(&format!("{fulldomain}."))
+                    && let Some(records) = rrset.get("records").and_then(|r| r.as_array())
                 {
-                    if let Some(records) = rrset.get("records").and_then(|r| r.as_array()) {
-                        for rec in records {
-                            if let Some(content) = rec.get("content").and_then(|c| c.as_str()) {
-                                let trimmed = content.trim_matches('"');
-                                if !trimmed.is_empty() {
-                                    challenges.push(trimmed.to_string());
-                                }
+                    for rec in records {
+                        if let Some(content) = rec.get("content").and_then(|c| c.as_str()) {
+                            let trimmed = content.trim_matches('"');
+                            if !trimmed.is_empty() {
+                                challenges.push(trimmed.to_string());
                             }
                         }
                     }

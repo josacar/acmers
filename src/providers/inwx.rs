@@ -22,14 +22,20 @@ impl DnsProvider for Inwx {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let user = env.get("INWX_User")
+        let user = env
+            .get("INWX_User")
             .ok_or_else(|| Error::Config("INWX_User required".into()))?
             .clone();
-        let pass = env.get("INWX_Password")
+        let pass = env
+            .get("INWX_Password")
             .ok_or_else(|| Error::Config("INWX_Password required".into()))?
             .clone();
         let shared_secret = env.get("INWX_Shared_Secret").cloned();
-        Ok(Box::new(Inwx { user, pass, shared_secret }))
+        Ok(Box::new(Inwx {
+            user,
+            pass,
+            shared_secret,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -49,13 +55,22 @@ impl DnsProvider for Inwx {
         };
         let zone_id = match self.resolve_zone(&session, domain) {
             Ok(z) => z,
-            Err(_) => { let _ = self.logout(&session); return Ok(()); }
+            Err(_) => {
+                let _ = self.logout(&session);
+                return Ok(());
+            }
         };
         let record_name = extract_record_name(name, domain);
         let record_id = match self.find_record_id(&session, &zone_id, &record_name, value) {
             Ok(Some(id)) => id,
-            Ok(None) => { let _ = self.logout(&session); return Ok(()); }
-            Err(_) => { let _ = self.logout(&session); return Ok(()); }
+            Ok(None) => {
+                let _ = self.logout(&session);
+                return Ok(());
+            }
+            Err(_) => {
+                let _ = self.logout(&session);
+                return Ok(());
+            }
         };
         let _ = self.delete_record(&session, &record_id);
         let _ = self.logout(&session);
@@ -97,11 +112,14 @@ impl Inwx {
                 p = xml_escape(&self.pass)
             )
         };
-        let body = xmlrpc_request("account.login", &vec![("struct_body", members.as_str())]);
+        let body = xmlrpc_request("account.login", &[("struct_body", members.as_str())]);
         let resp = http::post(BASE_URL, body.as_bytes(), "text/xml", &[])
             .map_err(|e| Error::Provider(format!("inwx login: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("inwx login: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "inwx login: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let code = xml_extract_value(&resp.body, "code");
         if code.as_deref() != Some("1000") {
@@ -109,14 +127,19 @@ impl Inwx {
             } else if code.as_deref() == Some("2000") {
                 return Err(Error::Provider("inwx login: invalid credentials".into()));
             }
-            let msg = xml_extract_value(&resp.body, "msg").unwrap_or_else(|| "unknown error".into());
-            return Err(Error::Provider(format!("inwx login failed (code={code:?}): {msg}")));
+            let msg =
+                xml_extract_value(&resp.body, "msg").unwrap_or_else(|| "unknown error".into());
+            return Err(Error::Provider(format!(
+                "inwx login failed (code={code:?}): {msg}"
+            )));
         }
         let tfa = xml_extract_value(&resp.body, "tfa");
         if tfa.as_deref() == Some("GOOGLE-AUTHENTICATOR") {
             if self.shared_secret.is_some() {
             } else {
-                return Err(Error::Provider("inwx: 2FA required but INWX_Shared_Secret not set".into()));
+                return Err(Error::Provider(
+                    "inwx: 2FA required but INWX_Shared_Secret not set".into(),
+                ));
             }
             self.login()
         } else {
@@ -138,12 +161,17 @@ impl Inwx {
         let resp = http::post(BASE_URL, body.as_bytes(), "text/xml", &[])
             .map_err(|e| Error::Provider(format!("inwx nameserver.list: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("inwx nameserver.list: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "inwx nameserver.list: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let code = xml_extract_value(&resp.body, "code");
         if code.as_deref() != Some("1000") {
             let msg = xml_extract_value(&resp.body, "msg").unwrap_or_else(|| "unknown".into());
-            return Err(Error::Provider(format!("inwx nameserver.list failed: {msg}")));
+            return Err(Error::Provider(format!(
+                "inwx nameserver.list failed: {msg}"
+            )));
         }
         let res_data = xml_extract_nested(&resp.body, "resData");
         if let Some(data) = res_data {
@@ -155,10 +183,18 @@ impl Inwx {
                 return Ok(id);
             }
         }
-        Err(Error::Provider(format!("inwx: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "inwx: zone not found for {domain}"
+        )))
     }
 
-    fn find_record_id(&self, _session: &str, zone_id: &str, record_name: &str, value: &str) -> Result<Option<String>, Error> {
+    fn find_record_id(
+        &self,
+        _session: &str,
+        zone_id: &str,
+        record_name: &str,
+        value: &str,
+    ) -> Result<Option<String>, Error> {
         let struct_body = format!(
             r#"<member><name>roId</name><value><int>{zid}</int></value></member>
       <member><name>type</name><value><string>TXT</string></value></member>
@@ -191,10 +227,9 @@ impl Inwx {
                     if rec_type.as_deref() == Some("TXT")
                         && rec_name.as_deref() == Some(record_name)
                         && rec_content.as_deref() == Some(value)
+                        && let Some(id) = xml_extract_value_in(rec, "member", "id")
                     {
-                        if let Some(id) = xml_extract_value_in(rec, "member", "id") {
-                            return Ok(Some(id));
-                        }
+                        return Ok(Some(id));
                     }
                 }
                 Ok(None)
@@ -202,7 +237,13 @@ impl Inwx {
         }
     }
 
-    fn create_record(&self, _session: &str, zone_id: &str, record_name: &str, value: &str) -> Result<String, Error> {
+    fn create_record(
+        &self,
+        _session: &str,
+        zone_id: &str,
+        record_name: &str,
+        value: &str,
+    ) -> Result<String, Error> {
         let struct_body = format!(
             r#"<member><name>roId</name><value><int>{zid}</int></value></member>
       <member><name>type</name><value><string>TXT</string></value></member>
@@ -217,17 +258,24 @@ impl Inwx {
         let resp = http::post(BASE_URL, body.as_bytes(), "text/xml", &[])
             .map_err(|e| Error::Provider(format!("inwx nameserver.createRecord: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("inwx createRecord: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "inwx createRecord: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let code = xml_extract_value(&resp.body, "code");
         if code.as_deref() != Some("1000") {
             let msg = xml_extract_value(&resp.body, "msg").unwrap_or_else(|| "unknown".into());
-            return Err(Error::Provider(format!("inwx createRecord failed (code={code:?}): {msg}")));
+            return Err(Error::Provider(format!(
+                "inwx createRecord failed (code={code:?}): {msg}"
+            )));
         }
         let res_data = xml_extract_nested(&resp.body, "resData").unwrap_or_default();
         let record_id = xml_extract_value_in(&res_data, "member", "id").unwrap_or_default();
         if record_id.is_empty() {
-            return Err(Error::Provider("inwx createRecord: could not extract record id".into()));
+            return Err(Error::Provider(
+                "inwx createRecord: could not extract record id".into(),
+            ));
         }
         Ok(record_id)
     }
@@ -241,7 +289,10 @@ impl Inwx {
         let resp = http::post(BASE_URL, body.as_bytes(), "text/xml", &[])
             .map_err(|e| Error::Provider(format!("inwx nameserver.deleteRecord: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("inwx deleteRecord: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "inwx deleteRecord: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let code = xml_extract_value(&resp.body, "code");
         if code.as_deref() != Some("1000") {
@@ -370,10 +421,10 @@ fn xml_extract_nested(xml: &str, name: &str) -> Option<String> {
                 if let Some(s_end) = inner.find("</string>") {
                     return Some(inner[8..s_end].to_string());
                 }
-            } else if inner.starts_with("<int>") {
-                if let Some(i_end) = inner.find("</int>") {
-                    return Some(inner[5..i_end].to_string());
-                }
+            } else if inner.starts_with("<int>")
+                && let Some(i_end) = inner.find("</int>")
+            {
+                return Some(inner[5..i_end].to_string());
             }
             return Some(inner.to_string());
         }

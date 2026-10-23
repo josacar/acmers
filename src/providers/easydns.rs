@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -20,10 +20,14 @@ impl DnsProvider for Easydns {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("EASYDNS_Token")
-            .ok_or_else(|| Error::Config("EASYDNS_Token required".into()))?.clone();
-        let key = env.get("EASYDNS_Key")
-            .ok_or_else(|| Error::Config("EASYDNS_Key required".into()))?.clone();
+        let token = env
+            .get("EASYDNS_Token")
+            .ok_or_else(|| Error::Config("EASYDNS_Token required".into()))?
+            .clone();
+        let key = env
+            .get("EASYDNS_Key")
+            .ok_or_else(|| Error::Config("EASYDNS_Key required".into()))?
+            .clone();
         let creds = format!("{token}:{key}");
         let basic_auth = format!("Basic {}", base64::encode_std(creds.as_bytes()));
         Ok(Box::new(Easydns { basic_auth }))
@@ -37,8 +41,13 @@ impl DnsProvider for Easydns {
             ("Authorization", self.basic_auth.as_str()),
             ("Accept", "application/json"),
         ];
-        let resp = http::put(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
-            .map_err(|e| Error::Provider(format!("easydns add TXT: {e}")))?;
+        let resp = http::put(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("easydns add TXT: {e}")))?;
         if resp.body.contains("\"status\":201") || resp.body.contains("Record already exists") {
             return Ok(());
         }
@@ -63,7 +72,8 @@ impl DnsProvider for Easydns {
         if count == 0 {
             return Ok(());
         }
-        let record_id = v.get("records")
+        let record_id = v
+            .get("records")
             .and_then(|r| r.as_array())
             .and_then(|arr| arr.first())
             .and_then(|r| r.get("id"))

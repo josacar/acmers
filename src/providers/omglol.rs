@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -22,10 +22,12 @@ impl DnsProvider for Omglol {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("OMG_ApiKey")
+        let api_key = env
+            .get("OMG_ApiKey")
             .ok_or_else(|| Error::Config("OMG_ApiKey required".into()))?
             .clone();
-        let address = env.get("OMG_Address")
+        let address = env
+            .get("OMG_Address")
             .ok_or_else(|| Error::Config("OMG_Address required".into()))?
             .clone()
             .trim_start_matches('@')
@@ -44,18 +46,28 @@ impl DnsProvider for Omglol {
             "ttl": 30,
         });
         let url = format!("{BASE_URL}/address/{}/dns", self.address);
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("omglol add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("omglol add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("omglol add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "omglol add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Provider(format!("omglol add TXT: parse: {e}")))?;
         if v.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
             return Ok(());
         }
-        let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("unknown error");
+        let msg = v
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown error");
         Err(Error::Provider(format!("omglol add TXT: {msg}")))
     }
 
@@ -72,7 +84,9 @@ impl DnsProvider for Omglol {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records = v.get("response").and_then(|r| r.as_array())
+        let records = v
+            .get("response")
+            .and_then(|r| r.as_array())
             .or_else(|| v.as_array());
         if let Some(records) = records {
             for record in records {
@@ -80,12 +94,14 @@ impl DnsProvider for Omglol {
                 let rname = record.get("name").and_then(|n| n.as_str()).unwrap_or("");
                 let rdata = record.get("data").and_then(|d| d.as_str()).unwrap_or("");
                 let expected_name = format!("{}.{}", dns_name, self.address);
-                if rtype == "TXT" && rname == expected_name && rdata == value {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/address/{}/dns/{}", self.address, id);
-                        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
-                        return Ok(());
-                    }
+                if rtype == "TXT"
+                    && rname == expected_name
+                    && rdata == value
+                    && let Some(id) = record_id(record)
+                {
+                    let del_url = format!("{BASE_URL}/address/{}/dns/{}", self.address, id);
+                    let _ = http::delete(&del_url, &[("Authorization", &auth)]);
+                    return Ok(());
                 }
             }
         }
@@ -106,15 +122,23 @@ impl Omglol {
         };
         let stripped = fqdn.strip_suffix(".omg.lol").unwrap_or(&fqdn);
         let suffix = format!(".{}", self.address);
-        stripped.strip_suffix(&suffix).unwrap_or(stripped).to_string()
+        stripped
+            .strip_suffix(&suffix)
+            .unwrap_or(stripped)
+            .to_string()
     }
 }
 
 fn record_id(v: &Value) -> Option<String> {
     v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
+        if i.is_string() {
+            i.as_str().map(|s| s.to_string())
+        } else if i.is_u64() {
+            i.as_u64().map(|n| n.to_string())
+        } else if i.is_i64() {
+            i.as_i64().map(|n| n.to_string())
+        } else {
+            None
+        }
     })
 }

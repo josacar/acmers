@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -20,10 +20,12 @@ impl DnsProvider for Restena {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("RESTENA_Username")
+        let username = env
+            .get("RESTENA_Username")
             .ok_or_else(|| Error::Config("RESTENA_Username required".into()))?
             .clone();
-        let password = env.get("RESTENA_Password")
+        let password = env
+            .get("RESTENA_Password")
             .ok_or_else(|| Error::Config("RESTENA_Password required".into()))?
             .clone();
         let creds = format!("{username}:{password}");
@@ -38,12 +40,16 @@ impl DnsProvider for Restena {
             "name": name,
             "data": value,
             "ttl": 120,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://rest.dns.restena.net/v1/domains/{domain}/records");
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("Restena add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Restena add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Restena add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -59,20 +65,25 @@ impl DnsProvider for Restena {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records: Option<&Vec<Value>> = v.as_array()
+        let records: Option<&Vec<Value>> = v
+            .as_array()
             .or_else(|| v.get("records").and_then(|r| r.as_array()));
         if let Some(arr) = records {
             for record in arr {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("data").and_then(|d| d.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://rest.dns.restena.net/v1/domains/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                    }
+                    let del_url =
+                        format!("https://rest.dns.restena.net/v1/domains/{domain}/records/{id}");
+                    let _ = http::delete(&del_url, headers);
                 }
             }
         }

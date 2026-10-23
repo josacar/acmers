@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for Dreamhost {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("DH_API_KEY")
+        let api_key = env
+            .get("DH_API_KEY")
             .ok_or_else(|| Error::Config("DH_API_KEY required".into()))?
             .clone();
         Ok(Box::new(Dreamhost { api_key }))
@@ -32,8 +33,8 @@ impl DnsProvider for Dreamhost {
             urlencode(name),
             urlencode(value),
         );
-        let resp = http::get(&url, &[])
-            .map_err(|e| Error::Provider(format!("DreamHost add TXT: {e}")))?;
+        let resp =
+            http::get(&url, &[]).map_err(|e| Error::Provider(format!("DreamHost add TXT: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("DreamHost response: {e}")))?;
         if v.get("result").and_then(|r| r.as_str()) != Some("success") {
@@ -49,8 +50,7 @@ impl DnsProvider for Dreamhost {
             urlencode(name),
             urlencode(value),
         );
-        http::get(&url, &[])
-            .map_err(|e| Error::Provider(format!("DreamHost remove TXT: {e}")))?;
+        http::get(&url, &[]).map_err(|e| Error::Provider(format!("DreamHost remove TXT: {e}")))?;
         Ok(())
     }
 }
@@ -59,7 +59,9 @@ fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             b' ' => out.push('+'),
             _ => {
                 let upper = (b >> 4) & 0xf;

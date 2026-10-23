@@ -137,7 +137,11 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let zone_path = dir.join("db.example.com");
-        fs::write(&zone_path, "example.com. SOA ns1.example.com. admin.example.com. ~\n").unwrap();
+        fs::write(
+            &zone_path,
+            "example.com. SOA ns1.example.com. admin.example.com. ~\n",
+        )
+        .unwrap();
 
         let m = Maradns {
             zone_file: zone_path.to_str().unwrap().into(),
@@ -167,7 +171,8 @@ mod tests {
             _pid_path: "/tmp/dummy.pid".into(),
         };
 
-        m.add_txt("example.com", "_acme-challenge.example.com", "token1").unwrap();
+        m.add_txt("example.com", "_acme-challenge.example.com", "token1")
+            .unwrap();
 
         let content = fs::read_to_string(&zone_path).unwrap();
         assert!(content.contains("example.com. SOA ns1.example.com. admin.example.com. ~"));
@@ -263,7 +268,8 @@ mod tests {
             _pid_path: "/tmp/dummy.pid".into(),
         };
 
-        m.remove_txt("example.com", "_acme-challenge.example.com", "token_A").unwrap();
+        m.remove_txt("example.com", "_acme-challenge.example.com", "token_A")
+            .unwrap();
 
         let new_content = fs::read_to_string(&zone_path).unwrap();
         assert!(!new_content.contains("_acme-challenge.example.com. TXT 'token_A' ~"));
@@ -287,11 +293,21 @@ mod tests {
             _pid_path: "/tmp/dummy.pid".into(),
         };
 
-        m.add_txt("example.com", "_acme-challenge.example.com", "roundtrip_token").unwrap();
+        m.add_txt(
+            "example.com",
+            "_acme-challenge.example.com",
+            "roundtrip_token",
+        )
+        .unwrap();
         let after_add = fs::read_to_string(&zone_path).unwrap();
         assert!(after_add.contains("_acme-challenge.example.com. TXT 'roundtrip_token' ~"));
 
-        m.remove_txt("example.com", "_acme-challenge.example.com", "roundtrip_token").unwrap();
+        m.remove_txt(
+            "example.com",
+            "_acme-challenge.example.com",
+            "roundtrip_token",
+        )
+        .unwrap();
         let after_rm = fs::read_to_string(&zone_path).unwrap();
         assert!(!after_rm.contains("roundtrip_token"));
         assert!(after_rm.contains("example.com. SOA ns1.example.com. admin.example.com. ~"));
@@ -305,15 +321,21 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let zone_path = dir.join("db.example.com");
-        fs::write(&zone_path, "example.com. SOA ns1.example.com. admin.example.com. ~\n").unwrap();
+        fs::write(
+            &zone_path,
+            "example.com. SOA ns1.example.com. admin.example.com. ~\n",
+        )
+        .unwrap();
 
         let m = Maradns {
             zone_file: zone_path.to_str().unwrap().into(),
             _pid_path: "/tmp/dummy.pid".into(),
         };
 
-        m.add_txt("example.com", "_acme-challenge.example.com", "token1").unwrap();
-        m.add_txt("example.com", "_acme-challenge.www.example.com", "token2").unwrap();
+        m.add_txt("example.com", "_acme-challenge.example.com", "token1")
+            .unwrap();
+        m.add_txt("example.com", "_acme-challenge.www.example.com", "token2")
+            .unwrap();
 
         let content = fs::read_to_string(&zone_path).unwrap();
         assert!(content.contains("_acme-challenge.example.com. TXT 'token1' ~"));

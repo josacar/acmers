@@ -4,6 +4,7 @@ use ring::hmac;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 pub struct Cyon {
@@ -23,10 +24,12 @@ impl DnsProvider for Cyon {
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
         Ok(Box::new(Cyon {
-            username: env.get("CY_Username")
+            username: env
+                .get("CY_Username")
                 .ok_or_else(|| Error::Config("CY_Username required".into()))?
                 .clone(),
-            password: env.get("CY_Password")
+            password: env
+                .get("CY_Password")
                 .ok_or_else(|| Error::Config("CY_Password required".into()))?
                 .clone(),
             otp_secret: env.get("CY_OTP_Secret").cloned().unwrap_or_default(),
@@ -78,8 +81,8 @@ impl Cyon {
     fn login(&self) -> Result<String, Error> {
         let form = format!(
             "username={}&password={}&pathname=%2F",
-            url_encode(&self.username),
-            url_encode(&self.password),
+            helpers::url_encode_form(&self.username),
+            helpers::url_encode_form(&self.password),
         );
         let resp = http::post(
             "https://my.cyon.ch/auth/index/dologin-async",
@@ -90,16 +93,12 @@ impl Cyon {
         .map_err(|e| Error::Provider(format!("cyon login: {e}")))?;
 
         if !resp.body.contains("\"onSuccess\":\"success\"") {
-            let msg = extract_json_field(&resp.body, "message")
-                .unwrap_or_else(|| "unknown error".into());
+            let msg =
+                extract_json_field(&resp.body, "message").unwrap_or_else(|| "unknown error".into());
             return Err(Error::Provider(format!("cyon login failed: {msg}")));
         }
 
-        let cookies = resp
-            .headers
-            .get("set-cookie")
-            .cloned()
-            .unwrap_or_default();
+        let cookies = resp.headers.get("set-cookie").cloned().unwrap_or_default();
         Ok(parse_cookies(&cookies))
     }
 
@@ -130,8 +129,8 @@ impl Cyon {
         .map_err(|e| Error::Provider(format!("cyon OTP: {e}")))?;
 
         if !resp.body.contains("\"onSuccess\":\"success\"") {
-            let msg = extract_json_field(&resp.body, "message")
-                .unwrap_or_else(|| "OTP failed".into());
+            let msg =
+                extract_json_field(&resp.body, "message").unwrap_or_else(|| "OTP failed".into());
             return Err(Error::Provider(format!("cyon OTP failed: {msg}")));
         }
 
@@ -145,8 +144,7 @@ impl Cyon {
             .map_err(|e| Error::Provider(format!("cyon domain page: {e}")))?;
 
         if resp.body.contains("\"iserror\":true") {
-            let msg = extract_json_field(&resp.body, "message")
-                .unwrap_or_else(|| "unknown".into());
+            let msg = extract_json_field(&resp.body, "message").unwrap_or_else(|| "unknown".into());
             return Err(Error::Provider(format!("cyon domain page error: {msg}")));
         }
 
@@ -156,21 +154,17 @@ impl Cyon {
             ))
         })?;
 
-        let env_url = format!(
-            "https://my.cyon.ch/user/environment/setdomain/d/{domain_env}/gik/{item_key}"
-        );
+        let env_url =
+            format!("https://my.cyon.ch/user/environment/setdomain/d/{domain_env}/gik/{item_key}");
         let resp = http::get(&env_url, headers)
             .map_err(|e| Error::Provider(format!("cyon set domain env: {e}")))?;
 
         if resp.body.contains("multi_factor_form") {
-            return Err(Error::Provider(
-                "cyon: missed OTP authentication".into(),
-            ));
+            return Err(Error::Provider("cyon: missed OTP authentication".into()));
         }
 
         if !resp.body.contains("\"authenticated\":true") {
-            let msg = extract_json_field(&resp.body, "message")
-                .unwrap_or_else(|| "unknown".into());
+            let msg = extract_json_field(&resp.body, "message").unwrap_or_else(|| "unknown".into());
             return Err(Error::Provider(format!(
                 "cyon domain env change failed: {msg}"
             )));
@@ -179,16 +173,11 @@ impl Cyon {
         update_cookies(cookies, &resp)
     }
 
-    fn add_txt_record(
-        &self,
-        fulldomain: &str,
-        value: &str,
-        cookies: &str,
-    ) -> Result<(), Error> {
+    fn add_txt_record(&self, fulldomain: &str, value: &str, cookies: &str) -> Result<(), Error> {
         let form = format!(
             "name={}.&ttl=900&type=TXT&dnscontent={}",
-            url_encode(fulldomain),
-            url_encode(value),
+            helpers::url_encode_form(fulldomain),
+            helpers::url_encode_form(value),
         );
         let headers: &[(&str, &str)] =
             &[("Cookie", cookies), ("X-Requested-With", "XMLHttpRequest")];
@@ -201,16 +190,13 @@ impl Cyon {
         .map_err(|e| Error::Provider(format!("cyon add TXT: {e}")))?;
 
         if resp.body.contains("multi_factor_form") {
-            return Err(Error::Provider(
-                "cyon: missed OTP authentication".into(),
-            ));
+            return Err(Error::Provider("cyon: missed OTP authentication".into()));
         }
 
         let status = extract_json_field(&resp.body, "status").unwrap_or_default();
         let valid = extract_json_field(&resp.body, "valid").unwrap_or_default();
         if status != "true" || valid != "true" {
-            let msg = extract_json_field(&resp.body, "message")
-                .unwrap_or_else(|| "unknown".into());
+            let msg = extract_json_field(&resp.body, "message").unwrap_or_else(|| "unknown".into());
             return Err(Error::Provider(format!("cyon add TXT failed: {msg}")));
         }
         Ok(())
@@ -219,16 +205,11 @@ impl Cyon {
     fn delete_txt_records(&self, fulldomain: &str, cookies: &str) -> Result<(), Error> {
         let headers: &[(&str, &str)] =
             &[("Cookie", cookies), ("X-Requested-With", "XMLHttpRequest")];
-        let resp = http::get(
-            "https://my.cyon.ch/domain/dnseditor/list-async",
-            headers,
-        )
-        .map_err(|e| Error::Provider(format!("cyon list DNS: {e}")))?;
+        let resp = http::get("https://my.cyon.ch/domain/dnseditor/list-async", headers)
+            .map_err(|e| Error::Provider(format!("cyon list DNS: {e}")))?;
 
         if resp.body.contains("multi_factor_form") {
-            return Err(Error::Provider(
-                "cyon: missed OTP authentication".into(),
-            ));
+            return Err(Error::Provider("cyon: missed OTP authentication".into()));
         }
 
         let target = format!("{fulldomain}.");
@@ -237,8 +218,8 @@ impl Cyon {
             if parts.len() == 2 && parts[0] == "TXT" && parts[1] == target {
                 let del_form = format!(
                     "hash={}&identifier={}",
-                    url_encode(&hash),
-                    url_encode(&identifier),
+                    helpers::url_encode_form(&hash),
+                    helpers::url_encode_form(&identifier),
                 );
                 let _ = http::post(
                     "https://my.cyon.ch/domain/dnseditor/delete-record-async",
@@ -253,11 +234,7 @@ impl Cyon {
 }
 
 fn update_cookies(current: &str, resp: &http::Response) -> Result<String, Error> {
-    let raw = resp
-        .headers
-        .get("set-cookie")
-        .cloned()
-        .unwrap_or_default();
+    let raw = resp.headers.get("set-cookie").cloned().unwrap_or_default();
     let new_cookies = parse_cookies(&raw);
     if new_cookies.is_empty() {
         Ok(current.to_string())
@@ -279,7 +256,7 @@ fn extract_json_field(body: &str, field: &str) -> Option<String> {
 }
 
 fn extract_item_key(html: &str, domain: &str) -> Option<String> {
-    let flat = html.replace('\n', " ").replace('\r', " ");
+    let flat = html.replace(['\n', '\r'], " ");
     let marker = format!("data-domain=\"{domain}\"");
     let pos = flat.find(&marker)?;
     let after = &flat[pos + marker.len()..];
@@ -386,30 +363,4 @@ fn parse_cookies(raw: &str) -> String {
         }
     }
     cookies.join("; ")
-}
-
-fn url_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(b as char)
-            }
-            b' ' => out.push('+'),
-            _ => {
-                out.push('%');
-                out.push(hex((b >> 4) & 0xf));
-                out.push(hex(b & 0xf));
-            }
-        }
-    }
-    out
-}
-
-fn hex(n: u8) -> char {
-    if n < 10 {
-        (b'0' + n) as char
-    } else {
-        (b'A' + n - 10) as char
-    }
 }

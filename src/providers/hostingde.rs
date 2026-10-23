@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -20,10 +20,12 @@ impl DnsProvider for Hostingde {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("HOSTINGDE_APIKEY")
+        let api_key = env
+            .get("HOSTINGDE_APIKEY")
             .ok_or_else(|| Error::Config("HOSTINGDE_APIKEY required".into()))?
             .clone();
-        let endpoint = env.get("HOSTINGDE_ENDPOINT")
+        let endpoint = env
+            .get("HOSTINGDE_ENDPOINT")
             .cloned()
             .unwrap_or_else(|| "https://secure.hosting.de/api/dns/v1/json".to_string());
         Ok(Box::new(Hostingde { api_key, endpoint }))
@@ -46,17 +48,30 @@ impl DnsProvider for Hostingde {
                 }]
             }
         });
-        let resp = http::post(&self.endpoint, &serde_json::to_vec(&body).unwrap(), "application/json", &[])
-            .map_err(|e| Error::Provider(format!("hostingde add TXT: {e}")))?;
+        let resp = http::post(
+            &self.endpoint,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[],
+        )
+        .map_err(|e| Error::Provider(format!("hostingde add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("hostingde add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "hostingde add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("hostingde add TXT response: {e}")))?;
-        if v.get("status").and_then(|s| s.as_str()) == Some("error") {
-            if let Some(msg) = v.get("errors").and_then(|e| e.as_array()).and_then(|a| a.first()).and_then(|e| e.get("message").or_else(|| e.get("text"))).and_then(|m| m.as_str()) {
-                return Err(Error::Provider(format!("hostingde add TXT: {msg}")));
-            }
+        if v.get("status").and_then(|s| s.as_str()) == Some("error")
+            && let Some(msg) = v
+                .get("errors")
+                .and_then(|e| e.as_array())
+                .and_then(|a| a.first())
+                .and_then(|e| e.get("message").or_else(|| e.get("text")))
+                .and_then(|m| m.as_str())
+        {
+            return Err(Error::Provider(format!("hostingde add TXT: {msg}")));
         }
         Ok(())
     }
@@ -81,7 +96,12 @@ impl DnsProvider for Hostingde {
                 "recordsToDelete": [record]
             }
         });
-        let _ = http::post(&self.endpoint, &serde_json::to_vec(&body).unwrap(), "application/json", &[]);
+        let _ = http::post(
+            &self.endpoint,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[],
+        );
         Ok(())
     }
 }
@@ -98,7 +118,12 @@ impl Hostingde {
                     "filter": {"field": "zoneName", "value": candidate}
                 }
             });
-            let resp = match http::post(&self.endpoint, &serde_json::to_vec(&body).unwrap(), "application/json", &[]) {
+            let resp = match http::post(
+                &self.endpoint,
+                &serde_json::to_vec(&body).unwrap(),
+                "application/json",
+                &[],
+            ) {
                 Ok(r) => r,
                 Err(_) => continue,
             };
@@ -106,15 +131,22 @@ impl Hostingde {
                 Ok(v) => v,
                 Err(_) => continue,
             };
-            if let Some(data) = v.get("response").and_then(|r| r.get("data")).and_then(|d| d.as_array()) {
-                if let Some(first) = data.first() {
-                    if let Some(name) = first.get("zoneName").or_else(|| first.get("name")).and_then(|n| n.as_str()) {
-                        return Ok(name.to_string());
-                    }
-                }
+            if let Some(data) = v
+                .get("response")
+                .and_then(|r| r.get("data"))
+                .and_then(|d| d.as_array())
+                && let Some(first) = data.first()
+                && let Some(name) = first
+                    .get("zoneName")
+                    .or_else(|| first.get("name"))
+                    .and_then(|n| n.as_str())
+            {
+                return Ok(name.to_string());
             }
         }
-        Err(Error::Provider(format!("hostingde: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "hostingde: zone not found for {domain}"
+        )))
     }
 
     fn find_record(&self, zone: &str, name: &str, value: &str) -> Result<Option<Value>, Error> {
@@ -125,13 +157,22 @@ impl Hostingde {
                 "zoneConfig": {"name": zone}
             }
         });
-        let resp = http::post(&self.endpoint, &serde_json::to_vec(&body).unwrap(), "application/json", &[])
-            .map_err(|e| Error::Provider(format!("hostingde zone info: {e}")))?;
+        let resp = http::post(
+            &self.endpoint,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[],
+        )
+        .map_err(|e| Error::Provider(format!("hostingde zone info: {e}")))?;
 
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("hostingde zone info: {e}")))?;
 
-        if let Some(records) = v.get("response").and_then(|r| r.get("records")).and_then(|r| r.as_array()) {
+        if let Some(records) = v
+            .get("response")
+            .and_then(|r| r.get("records"))
+            .and_then(|r| r.as_array())
+        {
             for record in records {
                 if record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("type").and_then(|t| t.as_str()) == Some("TXT")

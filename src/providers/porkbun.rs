@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -20,13 +20,18 @@ impl DnsProvider for Porkbun {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("PORKBUN_API_KEY")
+        let api_key = env
+            .get("PORKBUN_API_KEY")
             .ok_or_else(|| Error::Config("PORKBUN_API_KEY required".into()))?
             .clone();
-        let secret_api_key = env.get("PORKBUN_SECRET_API_KEY")
+        let secret_api_key = env
+            .get("PORKBUN_SECRET_API_KEY")
             .ok_or_else(|| Error::Config("PORKBUN_SECRET_API_KEY required".into()))?
             .clone();
-        Ok(Box::new(Porkbun { api_key, secret_api_key }))
+        Ok(Box::new(Porkbun {
+            api_key,
+            secret_api_key,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -37,16 +42,17 @@ impl DnsProvider for Porkbun {
             "name": name,
             "content": value,
             "ttl": "120",
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.porkbun.com/api/json/v3/dns/create/{domain}");
         let resp = http::post(&url, &body, "application/json", &[])
             .map_err(|e| Error::Provider(format!("Porkbun add TXT: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Porkbun response: {e}")))?;
-        if let Some(msg) = v.get("message").and_then(|m| m.as_str()) {
-            if v.get("status").and_then(|s| s.as_str()) != Some("SUCCESS") {
-                return Err(Error::Provider(format!("Porkbun add TXT: {msg}")));
-            }
+        if let Some(msg) = v.get("message").and_then(|m| m.as_str())
+            && v.get("status").and_then(|s| s.as_str()) != Some("SUCCESS")
+        {
+            return Err(Error::Provider(format!("Porkbun add TXT: {msg}")));
         }
         Ok(())
     }
@@ -55,7 +61,8 @@ impl DnsProvider for Porkbun {
         let list_body = serde_json::to_vec(&serde_json::json!({
             "apikey": self.api_key,
             "secretapikey": self.secret_api_key,
-        })).unwrap();
+        }))
+        .unwrap();
         let list_url = format!("https://api.porkbun.com/api/json/v3/dns/retrieve/{domain}");
         let resp = match http::post(&list_url, &list_body, "application/json", &[]) {
             Ok(r) => r,
@@ -70,16 +77,17 @@ impl DnsProvider for Porkbun {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("content").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| i.as_str())
                 {
-                    if let Some(id) = record.get("id").and_then(|i| i.as_str()) {
-                        let del_url = format!("https://api.porkbun.com/api/json/v3/dns/delete/{domain}/{id}");
-                        let del_body = serde_json::to_vec(&serde_json::json!({
-                            "apikey": self.api_key,
-                            "secretapikey": self.secret_api_key,
-                        })).unwrap();
-                        let _ = http::post(&del_url, &del_body, "application/json", &[]);
-                        return Ok(());
-                    }
+                    let del_url =
+                        format!("https://api.porkbun.com/api/json/v3/dns/delete/{domain}/{id}");
+                    let del_body = serde_json::to_vec(&serde_json::json!({
+                        "apikey": self.api_key,
+                        "secretapikey": self.secret_api_key,
+                    }))
+                    .unwrap();
+                    let _ = http::post(&del_url, &del_body, "application/json", &[]);
+                    return Ok(());
                 }
             }
         }

@@ -35,17 +35,25 @@ impl DnsProvider for Nsupdate {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["NSUPDATE_SERVER", "NSUPDATE_SERVER_PORT", "NSUPDATE_KEY", "NSUPDATE_ZONE"]
+        &[
+            "NSUPDATE_SERVER",
+            "NSUPDATE_SERVER_PORT",
+            "NSUPDATE_KEY",
+            "NSUPDATE_ZONE",
+        ]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let server_str = env.get("NSUPDATE_SERVER")
+        let server_str = env
+            .get("NSUPDATE_SERVER")
             .map(|s| s.as_str())
             .unwrap_or("localhost");
-        let port_str = env.get("NSUPDATE_SERVER_PORT")
+        let port_str = env
+            .get("NSUPDATE_SERVER_PORT")
             .map(|s| s.as_str())
             .unwrap_or("53");
-        let port: u16 = port_str.parse()
+        let port: u16 = port_str
+            .parse()
             .map_err(|_| Error::Config("NSUPDATE_SERVER_PORT must be a number".into()))?;
 
         let servers: Vec<(String, u16)> = server_str
@@ -58,11 +66,16 @@ impl DnsProvider for Nsupdate {
             None => None,
         };
 
-        let zone = env.get("NSUPDATE_ZONE")
+        let zone = env
+            .get("NSUPDATE_ZONE")
             .filter(|s| !s.is_empty())
             .map(|s| s.trim_end_matches('.').to_string());
 
-        Ok(Box::new(Nsupdate { servers, tsig_key, zone }))
+        Ok(Box::new(Nsupdate {
+            servers,
+            tsig_key,
+            zone,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -153,7 +166,9 @@ impl Nsupdate {
 
         let resp_id = u16::from_be_bytes([response[0], response[1]]);
         if resp_id != msg_id {
-            return Err(Error::Dns(format!("response ID mismatch: sent {msg_id}, got {resp_id}")));
+            return Err(Error::Dns(format!(
+                "response ID mismatch: sent {msg_id}, got {resp_id}"
+            )));
         }
 
         let rcode = u16::from_be_bytes([response[2], response[3]]) & 0x000F;
@@ -169,7 +184,8 @@ fn build_update_header(zone_count: u16, update_count: u16, additional_count: u16
     let id: u16 = (SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
-        .subsec_nanos() & 0xFFFF) as u16;
+        .subsec_nanos()
+        & 0xFFFF) as u16;
     let mut hdr = [0u8; 12];
     hdr[0] = (id >> 8) as u8;
     hdr[1] = id as u8;
@@ -217,7 +233,7 @@ fn sign_message(msg: &[u8], key: &TsigKey) -> Result<Vec<u8>, Error> {
     let fudge: u16 = 300;
 
     let alg_name = key.algorithm.domain_name();
-    let alg_encoded = encode_name(&alg_name);
+    let alg_encoded = encode_name(alg_name);
     let key_name_encoded = encode_name(&key.name);
 
     let time_bytes = time_to_48bit(time_signed);
@@ -290,14 +306,16 @@ fn compute_hmac(key: &TsigKey, data: &[u8]) -> Result<Vec<u8>, Error> {
 }
 
 fn send_udp(addr: &str, msg: &[u8]) -> Result<Vec<u8>, Error> {
-    let socket = UdpSocket::bind("0.0.0.0:0")
-        .map_err(|e| Error::Dns(format!("bind UDP: {e}")))?;
-    socket.set_read_timeout(Some(std::time::Duration::from_secs(10)))
+    let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| Error::Dns(format!("bind UDP: {e}")))?;
+    socket
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
         .map_err(|e| Error::Dns(format!("set timeout: {e}")))?;
-    socket.send_to(msg, addr)
+    socket
+        .send_to(msg, addr)
         .map_err(|e| Error::Dns(format!("send to {addr}: {e}")))?;
     let mut buf = vec![0u8; 4096];
-    let n = socket.recv_from(&mut buf)
+    let n = socket
+        .recv_from(&mut buf)
         .map_err(|e| Error::Dns(format!("recv from {addr}: {e}")))?;
     buf.truncate(n.0);
     Ok(buf)
@@ -314,8 +332,8 @@ fn parse_tsig_key_content(content: &str) -> Result<TsigKey, Error> {
         .lines()
         .map(|l| {
             let l = l.split("//").next().unwrap_or(l);
-            let l = l.split('#').next().unwrap_or(l);
-            l
+
+            l.split('#').next().unwrap_or(l)
         })
         .collect::<Vec<_>>()
         .join("\n");
@@ -335,7 +353,11 @@ fn parse_tsig_key_content(content: &str) -> Result<TsigKey, Error> {
         "hmacsha256" => TsigAlgorithm::HmacSha256,
         "hmacsha384" => TsigAlgorithm::HmacSha384,
         "hmacsha512" => TsigAlgorithm::HmacSha512,
-        other => return Err(Error::Config(format!("unsupported TSIG algorithm: {other}"))),
+        other => {
+            return Err(Error::Config(format!(
+                "unsupported TSIG algorithm: {other}"
+            )));
+        }
     };
 
     let secret = base64::decode_std(&secret_b64)
@@ -354,15 +376,19 @@ fn extract_value(content: &str, keyword: &str) -> Option<String> {
     let pos = lower.find(&kw_lower)?;
     let after = &content[pos + kw_lower.len()..];
     let after = after.trim_start();
-    if after.starts_with('"') {
-        let rest = &after[1..];
+    if let Some(rest) = after.strip_prefix('"') {
         let end = rest.find('"')?;
         Some(rest[..end].to_string())
     } else {
-        let end = after.find(|c: char| c == ';' || c == '\n' || c == '}' || c.is_whitespace())
+        let end = after
+            .find(|c: char| c == ';' || c == '\n' || c == '}' || c.is_whitespace())
             .unwrap_or(after.len());
         let val = after[..end].trim();
-        if val.is_empty() { None } else { Some(val.to_string()) }
+        if val.is_empty() {
+            None
+        } else {
+            Some(val.to_string())
+        }
     }
 }
 
@@ -404,13 +430,23 @@ mod tests {
     #[test]
     fn test_encode_name() {
         let encoded = encode_name("example.com.");
-        assert_eq!(encoded, vec![7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0]);
+        assert_eq!(
+            encoded,
+            vec![
+                7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0
+            ]
+        );
     }
 
     #[test]
     fn test_encode_name_no_trailing_dot() {
         let encoded = encode_name("example.com");
-        assert_eq!(encoded, vec![7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0]);
+        assert_eq!(
+            encoded,
+            vec![
+                7, b'e', b'x', b'a', b'm', b'p', b'l', b'e', 3, b'c', b'o', b'm', 0
+            ]
+        );
     }
 
     #[test]
@@ -484,7 +520,10 @@ key "testkey" {
             tsig_key: None,
             zone: None,
         };
-        assert_eq!(ns.resolve_zone("_acme-challenge.example.com."), "example.com");
+        assert_eq!(
+            ns.resolve_zone("_acme-challenge.example.com."),
+            "example.com"
+        );
     }
 
     #[test]
@@ -494,12 +533,18 @@ key "testkey" {
             tsig_key: None,
             zone: Some("myzone.com".into()),
         };
-        assert_eq!(ns.resolve_zone("_acme-challenge.sub.myzone.com."), "myzone.com");
+        assert_eq!(
+            ns.resolve_zone("_acme-challenge.sub.myzone.com."),
+            "myzone.com"
+        );
     }
 
     #[test]
     fn test_tsig_algorithm_domain_names() {
-        assert_eq!(TsigAlgorithm::HmacMd5.domain_name(), "hmac-md5.sig-alg.reg.int.");
+        assert_eq!(
+            TsigAlgorithm::HmacMd5.domain_name(),
+            "hmac-md5.sig-alg.reg.int."
+        );
         assert_eq!(TsigAlgorithm::HmacSha256.domain_name(), "hmac-sha256.");
         assert_eq!(TsigAlgorithm::HmacSha512.domain_name(), "hmac-sha512.");
     }
@@ -555,7 +600,10 @@ key "testkey" {
     #[test]
     fn test_nsupdate_new_multi_server() {
         let p = Nsupdate {
-            servers: vec![("ns1.example.com".into(), 5353), ("ns2.example.com".into(), 5353)],
+            servers: vec![
+                ("ns1.example.com".into(), 5353),
+                ("ns2.example.com".into(), 5353),
+            ],
             tsig_key: None,
             zone: None,
         };
@@ -617,7 +665,9 @@ key "testkey" {
         use std::thread;
 
         let server_socket = StdUdpSocket::bind("127.0.0.1:0").unwrap();
-        server_socket.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        server_socket
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
         let server_addr = server_socket.local_addr().unwrap();
         let port = server_addr.port();
 
@@ -656,7 +706,9 @@ key "testkey" {
         use std::thread;
 
         let server_socket = StdUdpSocket::bind("127.0.0.1:0").unwrap();
-        server_socket.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        server_socket
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
         let port = server_socket.local_addr().unwrap().port();
 
         let (tx, rx) = mpsc::channel::<()>();
@@ -694,7 +746,9 @@ key "testkey" {
         use std::thread;
 
         let server_socket = StdUdpSocket::bind("127.0.0.1:0").unwrap();
-        server_socket.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        server_socket
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
         let port = server_socket.local_addr().unwrap().port();
 
         let (tx, rx) = mpsc::channel::<()>();

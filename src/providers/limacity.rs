@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -24,12 +24,17 @@ impl Limacity {
         let resp = http::get(&url, &[("Authorization", &self.auth_header())])
             .map_err(|e| Error::Provider(format!("limacity domains: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("limacity domains: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "limacity domains: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("limacity domains: {e}")))?;
 
-        let domains = v.get("domains").and_then(|d| d.as_array())
+        let domains = v
+            .get("domains")
+            .and_then(|d| d.as_array())
             .ok_or_else(|| Error::Provider("limacity: no domains in response".into()))?;
 
         let parts: Vec<&str> = fulldomain.split('.').collect();
@@ -39,23 +44,25 @@ impl Limacity {
                 break;
             }
             for domain in domains {
-                if domain.get("unicode_fqdn").and_then(|f| f.as_str()) == Some(&h) {
-                    if let Some(id) = domain.get("id") {
-                        let id_str = if id.is_u64() {
-                            id.as_u64().unwrap().to_string()
-                        } else if id.is_i64() {
-                            id.as_i64().unwrap().to_string()
-                        } else if id.is_string() {
-                            id.as_str().unwrap().to_string()
-                        } else {
-                            continue;
-                        };
-                        return Ok(id_str);
-                    }
+                if domain.get("unicode_fqdn").and_then(|f| f.as_str()) == Some(&h)
+                    && let Some(id) = domain.get("id")
+                {
+                    let id_str = if id.is_u64() {
+                        id.as_u64().unwrap().to_string()
+                    } else if id.is_i64() {
+                        id.as_i64().unwrap().to_string()
+                    } else if id.is_string() {
+                        id.as_str().unwrap().to_string()
+                    } else {
+                        continue;
+                    };
+                    return Ok(id_str);
                 }
             }
         }
-        Err(Error::Provider(format!("limacity: no domain found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "limacity: no domain found for {fulldomain}"
+        )))
     }
 }
 
@@ -69,7 +76,8 @@ impl DnsProvider for Limacity {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("LIMACITY_APIKEY")
+        let api_key = env
+            .get("LIMACITY_APIKEY")
             .ok_or_else(|| Error::Config("LIMACITY_APIKEY required".into()))?
             .clone();
         Ok(Box::new(Limacity { api_key }))
@@ -88,16 +96,26 @@ impl DnsProvider for Limacity {
             }
         });
         let url = format!("{BASE_URL}/domains/{domain_id}/records.json");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("limacity add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("limacity add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("limacity add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "limacity add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("limacity response: {e}")))?;
         if v.get("status").and_then(|s| s.as_str()) != Some("ok") {
-            let msg = v.get("message").and_then(|m| m.as_str()).unwrap_or("unknown error");
+            let msg = v
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("unknown error");
             return Err(Error::Provider(format!("limacity add TXT: {msg}")));
         }
         Ok(())
@@ -120,17 +138,18 @@ impl DnsProvider for Limacity {
             Err(_) => return Ok(()),
         };
 
-        let records = v.get("records").and_then(|r| r.as_array())
+        let records = v
+            .get("records")
+            .and_then(|r| r.as_array())
             .or_else(|| v.as_array());
         if let Some(records) = records {
             for record in records {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
+                    && let Some(id) = record_id(record)
                 {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/domains/{domain_id}/records/{id}");
-                        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
-                    }
+                    let del_url = format!("{BASE_URL}/domains/{domain_id}/records/{id}");
+                    let _ = http::delete(&del_url, &[("Authorization", &auth)]);
                 }
             }
         }
@@ -140,9 +159,14 @@ impl DnsProvider for Limacity {
 
 fn record_id(v: &Value) -> Option<String> {
     v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
+        if i.is_string() {
+            i.as_str().map(|s| s.to_string())
+        } else if i.is_u64() {
+            i.as_u64().map(|n| n.to_string())
+        } else if i.is_i64() {
+            i.as_i64().map(|n| n.to_string())
+        } else {
+            None
+        }
     })
 }

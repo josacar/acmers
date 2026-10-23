@@ -37,13 +37,18 @@ impl DnsProvider for Dnsmadeeasy {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("ME_Key")
+        let api_key = env
+            .get("ME_Key")
             .ok_or_else(|| Error::Config("ME_Key required".into()))?
             .clone();
-        let api_secret = env.get("ME_Secret")
+        let api_secret = env
+            .get("ME_Secret")
             .ok_or_else(|| Error::Config("ME_Secret required".into()))?
             .clone();
-        Ok(Box::new(Dnsmadeeasy { api_key, api_secret }))
+        Ok(Box::new(Dnsmadeeasy {
+            api_key,
+            api_secret,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -63,11 +68,19 @@ impl DnsProvider for Dnsmadeeasy {
             ("x-dnsme-hmac", &hmac_hex),
             ("x-dnsme-requestDate", &ts),
         ];
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
-            .map_err(|e| Error::Provider(format!("DNSMadeEasy create record: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("DNSMadeEasy create record: {e}")))?;
 
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("DNSMadeEasy create record: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "DNSMadeEasy create record: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -120,7 +133,10 @@ impl Dnsmadeeasy {
             .map_err(|e| Error::Provider(format!("DNSMadeEasy list domains: {e}")))?;
 
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("DNSMadeEasy list domains: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "DNSMadeEasy list domains: {} {}",
+                resp.status, resp.body
+            )));
         }
 
         let v: serde_json::Value = serde_json::from_str(&resp.body)
@@ -129,24 +145,30 @@ impl Dnsmadeeasy {
         if let Some(domains) = v.get("data").and_then(|d| d.as_array()) {
             for d in domains {
                 let dname = d.get("name").and_then(|n| n.as_str()).unwrap_or("");
-                if domain == dname || domain.ends_with(&format!(".{dname}")) {
-                    if let Some(id) = d.get("id").and_then(|i| i.as_i64()).map(|i| i.to_string()) {
-                        return Ok(id);
-                    }
+                if (domain == dname || domain.ends_with(&format!(".{dname}")))
+                    && let Some(id) = d.get("id").and_then(|i| i.as_i64()).map(|i| i.to_string())
+                {
+                    return Ok(id);
                 }
             }
         }
         Err(Error::Provider(format!("domain not found: {domain}")))
     }
 
-    fn find_record(&self, domain_id: &str, short_name: &str, value: &str) -> Result<Option<String>, Error> {
+    fn find_record(
+        &self,
+        domain_id: &str,
+        short_name: &str,
+        value: &str,
+    ) -> Result<Option<String>, Error> {
         let (hmac_hex, ts) = self.make_hmac();
         let headers: &[(&str, &str)] = &[
             ("x-dnsme-apiKey", &self.api_key),
             ("x-dnsme-hmac", &hmac_hex),
             ("x-dnsme-requestDate", &ts),
         ];
-        let url = format!("{BASE_URL}/dns/managed/{domain_id}/records?recordName={short_name}&type=TXT");
+        let url =
+            format!("{BASE_URL}/dns/managed/{domain_id}/records?recordName={short_name}&type=TXT");
         let resp = http::get(&url, headers)
             .map_err(|e| Error::Provider(format!("DNSMadeEasy list records: {e}")))?;
 
@@ -160,10 +182,13 @@ impl Dnsmadeeasy {
         if let Some(records) = v.get("data").and_then(|r| r.as_array()) {
             for record in records {
                 let rval = record.get("value").and_then(|v| v.as_str()).unwrap_or("");
-                if rval == value {
-                    if let Some(id) = record.get("id").and_then(|i| i.as_i64()).map(|i| i.to_string()) {
-                        return Ok(Some(id));
-                    }
+                if rval == value
+                    && let Some(id) = record
+                        .get("id")
+                        .and_then(|i| i.as_i64())
+                        .map(|i| i.to_string())
+                {
+                    return Ok(Some(id));
                 }
             }
         }

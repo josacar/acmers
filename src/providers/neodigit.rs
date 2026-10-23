@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -21,7 +21,8 @@ impl DnsProvider for Neodigit {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("NEODIGIT_API_TOKEN")
+        let token = env
+            .get("NEODIGIT_API_TOKEN")
             .ok_or_else(|| Error::Config("NEODIGIT_API_TOKEN required".into()))?
             .clone();
         Ok(Box::new(Neodigit { token }))
@@ -39,11 +40,18 @@ impl DnsProvider for Neodigit {
             }
         });
         let url = format!("{BASE_URL}/dns/zones/{zone_id}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("X-TCPanel-Token", &self.token)])
-            .map_err(|e| Error::Provider(format!("neodigit add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("X-TCPanel-Token", &self.token)],
+        )
+        .map_err(|e| Error::Provider(format!("neodigit add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("neodigit add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "neodigit add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -54,7 +62,8 @@ impl DnsProvider for Neodigit {
             Err(_) => return Ok(()),
         };
 
-        let list_url = format!("{BASE_URL}/dns/zones/{zone_id}/records?type=TXT&name={name}&content={value}");
+        let list_url =
+            format!("{BASE_URL}/dns/zones/{zone_id}/records?type=TXT&name={name}&content={value}");
         let resp = match http::get(&list_url, &[("X-TCPanel-Token", &self.token)]) {
             Ok(r) => r,
             Err(_) => return Ok(()),
@@ -63,17 +72,18 @@ impl DnsProvider for Neodigit {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records = v.as_array()
+        let records = v
+            .as_array()
             .or_else(|| v.get("data").and_then(|d| d.as_array()))
             .or_else(|| v.get("records").and_then(|r| r.as_array()));
         if let Some(records) = records {
             for record in records {
-                if record.get("type").and_then(|t| t.as_str()) == Some("TXT") {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/dns/zones/{zone_id}/records/{id}");
-                        let _ = http::delete(&del_url, &[("X-TCPanel-Token", &self.token)]);
-                        return Ok(());
-                    }
+                if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
+                    && let Some(id) = record_id(record)
+                {
+                    let del_url = format!("{BASE_URL}/dns/zones/{zone_id}/records/{id}");
+                    let _ = http::delete(&del_url, &[("X-TCPanel-Token", &self.token)]);
+                    return Ok(());
                 }
             }
         }
@@ -95,25 +105,26 @@ impl Neodigit {
             }
             let v: Value = serde_json::from_str(&resp.body)
                 .map_err(|e| Error::Provider(format!("neodigit zone lookup: {e}")))?;
-            let zones = v.as_array()
+            let zones = v
+                .as_array()
                 .or_else(|| v.get("data").and_then(|d| d.as_array()))
                 .or_else(|| v.get("zones").and_then(|z| z.as_array()));
             if let Some(zones) = zones {
                 for zone in zones {
-                    if zone.get("name").and_then(|n| n.as_str()) == Some(&h) {
-                        if let Some(id) = record_id(zone) {
-                            let sub = if i == 0 {
-                                full.to_string()
+                    if zone.get("name").and_then(|n| n.as_str()) == Some(&h)
+                        && let Some(id) = record_id(zone)
+                    {
+                        let sub = if i == 0 {
+                            full.to_string()
+                        } else {
+                            let prefix = parts[..i].join(".");
+                            if full.is_empty() {
+                                prefix
                             } else {
-                                let prefix = parts[..i].join(".");
-                                if full.is_empty() {
-                                    prefix
-                                } else {
-                                    format!("{prefix}.{full}")
-                                }
-                            };
-                            return Ok((id, sub));
-                        }
+                                format!("{prefix}.{full}")
+                            }
+                        };
+                        return Ok((id, sub));
                     }
                 }
             }
@@ -124,9 +135,14 @@ impl Neodigit {
 
 fn record_id(v: &Value) -> Option<String> {
     v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
+        if i.is_string() {
+            i.as_str().map(|s| s.to_string())
+        } else if i.is_u64() {
+            i.as_u64().map(|n| n.to_string())
+        } else if i.is_i64() {
+            i.as_i64().map(|n| n.to_string())
+        } else {
+            None
+        }
     })
 }

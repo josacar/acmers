@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -21,10 +21,12 @@ impl DnsProvider for One {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("ONE_Username")
+        let username = env
+            .get("ONE_Username")
             .ok_or_else(|| Error::Config("ONE_Username required".into()))?
             .clone();
-        let password = env.get("ONE_Password")
+        let password = env
+            .get("ONE_Password")
             .ok_or_else(|| Error::Config("ONE_Password required".into()))?
             .clone();
         Ok(Box::new(One { username, password }))
@@ -43,12 +45,15 @@ impl DnsProvider for One {
                 "prefix": sub_domain,
                 "content": value,
             }
-        })).unwrap();
-        let resp = http::post(&url, &body, "application/json",
-            &[("Cookie", &cookie)])
+        }))
+        .unwrap();
+        let resp = http::post(&url, &body, "application/json", &[("Cookie", &cookie)])
             .map_err(|e| Error::Provider(format!("One.com add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("One.com add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "One.com add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -62,7 +67,8 @@ impl DnsProvider for One {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let list_url = format!("https://www.one.com/admin/api/domains/{main_domain}/dns/custom_records");
+        let list_url =
+            format!("https://www.one.com/admin/api/domains/{main_domain}/dns/custom_records");
         let resp = match http::get(&list_url, &[("Cookie", &cookie)]) {
             Ok(r) => r,
             Err(_) => return Ok(()),
@@ -80,11 +86,12 @@ impl DnsProvider for One {
                 if attrs.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && attrs.get("prefix").and_then(|p| p.as_str()) == Some(sub_domain.as_str())
                     && attrs.get("content").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| i.as_str())
                 {
-                    if let Some(id) = record.get("id").and_then(|i| i.as_str()) {
-                        let del_url = format!("https://www.one.com/admin/api/domains/{main_domain}/dns/custom_records/{id}");
-                        let _ = http::delete(&del_url, &[("Cookie", &cookie)]);
-                    }
+                    let del_url = format!(
+                        "https://www.one.com/admin/api/domains/{main_domain}/dns/custom_records/{id}"
+                    );
+                    let _ = http::delete(&del_url, &[("Cookie", &cookie)]);
                 }
             }
         }
@@ -103,8 +110,11 @@ impl One {
             data.as_bytes(),
             "application/x-www-form-urlencoded",
             &[],
-        ).map_err(|e| Error::Provider(format!("One.com login: {e}")))?;
-        let cookie = resp.headers.iter()
+        )
+        .map_err(|e| Error::Provider(format!("One.com login: {e}")))?;
+        let cookie = resp
+            .headers
+            .iter()
             .find(|(k, v)| k.as_str() == "set-cookie" && v.contains("OneSIDCrmAdmin"))
             .map(|(_, v)| {
                 let end = v.find(';').unwrap_or(v.len());
@@ -114,7 +124,7 @@ impl One {
         Ok(cookie)
     }
 
-    fn get_root<'a>(&self, domain: &str, cookie: &str) -> Result<(String, String), Error> {
+    fn get_root(&self, domain: &str, cookie: &str) -> Result<(String, String), Error> {
         let parts: Vec<&str> = domain.split('.').collect();
         for i in 0..parts.len() {
             let h = parts[i..].join(".");
@@ -129,6 +139,8 @@ impl One {
                 return Ok((h, sub_domain));
             }
         }
-        Err(Error::Provider(format!("One.com: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "One.com: zone not found for {domain}"
+        )))
     }
 }

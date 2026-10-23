@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -23,10 +23,12 @@ impl DnsProvider for Artfiles {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("AF_API_USERNAME")
+        let username = env
+            .get("AF_API_USERNAME")
             .ok_or_else(|| Error::Config("AF_API_USERNAME required".into()))?
             .clone();
-        let password = env.get("AF_API_PASSWORD")
+        let password = env
+            .get("AF_API_PASSWORD")
             .ok_or_else(|| Error::Config("AF_API_PASSWORD required".into()))?
             .clone();
         Ok(Box::new(Artfiles { username, password }))
@@ -49,7 +51,8 @@ impl DnsProvider for Artfiles {
         let zone = self.get_zone(domain, &auth)?;
         let records = self.get_txt_records(&zone, &auth)?;
         let target = format!("_acme-challenge \"{}\"", value);
-        let filtered: Vec<&str> = records.lines()
+        let filtered: Vec<&str> = records
+            .lines()
             .filter(|line| line.trim() != target)
             .collect();
         let new_records = filtered.join("\n");
@@ -67,9 +70,13 @@ impl Artfiles {
         let resp = http::get(
             &format!("{}/domain/get_domains.html", BASE_URL),
             &[("Authorization", auth)],
-        ).map_err(|e| Error::Provider(format!("artfiles get domains: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("artfiles get domains: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("artfiles get domains: HTTP {}", resp.status)));
+            return Err(Error::Provider(format!(
+                "artfiles get domains: HTTP {}",
+                resp.status
+            )));
         }
         let domains = &resp.body;
         let mut current = fqdn;
@@ -83,7 +90,9 @@ impl Artfiles {
                 break;
             }
         }
-        Err(Error::Provider("artfiles: couldn't find root domain zone".into()))
+        Err(Error::Provider(
+            "artfiles: couldn't find root domain zone".into(),
+        ))
     }
 
     fn get_txt_records(&self, zone: &str, auth: &str) -> Result<String, Error> {
@@ -107,18 +116,30 @@ impl Artfiles {
 
     fn set_txt_records(&self, zone: &str, records: &str, auth: &str) -> Result<(), Error> {
         let encoded = urlencode(records);
-        let url = format!("{}/dns/set_dns.html?domain={}&TXT={}", BASE_URL, zone, encoded);
-        let resp = http::post(&url, b"", "application/x-www-form-urlencoded", &[("Authorization", auth)])
-            .map_err(|e| Error::Provider(format!("artfiles set DNS: {e}")))?;
+        let url = format!(
+            "{}/dns/set_dns.html?domain={}&TXT={}",
+            BASE_URL, zone, encoded
+        );
+        let resp = http::post(
+            &url,
+            b"",
+            "application/x-www-form-urlencoded",
+            &[("Authorization", auth)],
+        )
+        .map_err(|e| Error::Provider(format!("artfiles set DNS: {e}")))?;
         if !resp.body.contains("status\":\"OK") {
-            return Err(Error::Provider(format!("artfiles set DNS: {}", &resp.body[..resp.body.len().min(200)])));
+            return Err(Error::Provider(format!(
+                "artfiles set DNS: {}",
+                &resp.body[..resp.body.len().min(200)]
+            )));
         }
         Ok(())
     }
 }
 
 fn extract_txt_field(body: &str) -> Result<String, Error> {
-    let start = body.find("TXT\":\"")
+    let start = body
+        .find("TXT\":\"")
         .ok_or_else(|| Error::Provider("artfiles: no TXT field in response".into()))?;
     let rest = &body[start + 6..];
     let end = rest.find('}').unwrap_or(rest.len());
@@ -131,7 +152,9 @@ fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }

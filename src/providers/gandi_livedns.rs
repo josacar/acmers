@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for GandiLivedns {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("GANDI_LIVEDNS_TOKEN")
+        let token = env
+            .get("GANDI_LIVEDNS_TOKEN")
             .ok_or_else(|| Error::Config("GANDI_LIVEDNS_TOKEN required".into()))?
             .clone();
         Ok(Box::new(GandiLivedns { token }))
@@ -33,16 +34,17 @@ impl DnsProvider for GandiLivedns {
             "rrset_name": name,
             "rrset_ttl": 120,
             "rrset_values": [value],
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.gandi.net/v5/livedns/domains/{fqdn}/records");
         let resp = http::post(&url, &body, "application/json", &[("Authorization", &auth)])
             .map_err(|e| Error::Provider(format!("Gandi add TXT: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Gandi response: {e}")))?;
-        if let Some(msg) = v.get("message").and_then(|m| m.as_str()) {
-            if resp.status >= 400 {
-                return Err(Error::Provider(format!("Gandi add TXT: {msg}")));
-            }
+        if let Some(msg) = v.get("message").and_then(|m| m.as_str())
+            && resp.status >= 400
+        {
+            return Err(Error::Provider(format!("Gandi add TXT: {msg}")));
         }
         Ok(())
     }
@@ -61,16 +63,19 @@ impl DnsProvider for GandiLivedns {
 
 impl GandiLivedns {
     fn resolve_zone(&self, domain: &str, auth: &str) -> Result<String, Error> {
-        let resp = http::get("https://api.gandi.net/v5/livedns/domains", &[("Authorization", auth)])
-            .map_err(|e| Error::Provider(format!("Gandi list domains: {e}")))?;
+        let resp = http::get(
+            "https://api.gandi.net/v5/livedns/domains",
+            &[("Authorization", auth)],
+        )
+        .map_err(|e| Error::Provider(format!("Gandi list domains: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Gandi domains: {e}")))?;
         if let Some(fqdns) = v.as_array() {
             for f in fqdns {
-                if let Some(fqdn) = f.as_str() {
-                    if domain == fqdn || domain.ends_with(&format!(".{fqdn}")) {
-                        return Ok(fqdn.to_string());
-                    }
+                if let Some(fqdn) = f.as_str()
+                    && (domain == fqdn || domain.ends_with(&format!(".{fqdn}")))
+                {
+                    return Ok(fqdn.to_string());
                 }
             }
         }

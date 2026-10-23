@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for Linodev4 {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("LINODE_V4_API_KEY")
+        let token = env
+            .get("LINODE_V4_API_KEY")
             .ok_or_else(|| Error::Config("LINODE_V4_API_KEY required".into()))?
             .clone();
         Ok(Box::new(Linodev4 { token }))
@@ -35,16 +36,19 @@ impl DnsProvider for Linodev4 {
             "target": value,
             "ttl_sec": 120,
             "priority": 0,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.linode.com/v4/domains/{domain_id}/records");
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("Linode add TXT: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Linode response: {e}")))?;
-        if let Some(errors) = v.get("errors").and_then(|e| e.as_array()) {
-            if let Some(err) = errors.first().and_then(|e| e.get("reason").and_then(|r| r.as_str())) {
-                return Err(Error::Provider(format!("Linode add TXT: {err}")));
-            }
+        if let Some(errors) = v.get("errors").and_then(|e| e.as_array())
+            && let Some(err) = errors
+                .first()
+                .and_then(|e| e.get("reason").and_then(|r| r.as_str()))
+        {
+            return Err(Error::Provider(format!("Linode add TXT: {err}")));
         }
         Ok(())
     }
@@ -70,12 +74,12 @@ impl DnsProvider for Linodev4 {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("target").and_then(|t| t.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| i.as_i64())
                 {
-                    if let Some(id) = record.get("id").and_then(|i| i.as_i64()) {
-                        let del_url = format!("https://api.linode.com/v4/domains/{domain_id}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url =
+                        format!("https://api.linode.com/v4/domains/{domain_id}/records/{id}");
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }
@@ -91,12 +95,11 @@ impl Linodev4 {
             .map_err(|e| Error::Json(format!("Linode domains: {e}")))?;
         if let Some(domains) = v.get("data").and_then(|d| d.as_array()) {
             for d in domains {
-                if let Some(name) = d.get("domain").and_then(|n| n.as_str()) {
-                    if domain == name || domain.ends_with(&format!(".{name}")) {
-                        if let Some(id) = d.get("id").and_then(|i| i.as_i64()) {
-                            return Ok(id.to_string());
-                        }
-                    }
+                if let Some(name) = d.get("domain").and_then(|n| n.as_str())
+                    && (domain == name || domain.ends_with(&format!(".{name}")))
+                    && let Some(id) = d.get("id").and_then(|i| i.as_i64())
+                {
+                    return Ok(id.to_string());
                 }
             }
         }

@@ -22,11 +22,13 @@ impl DnsProvider for Czechia {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let auth_token = env.get("CZ_AuthorizationToken")
+        let auth_token = env
+            .get("CZ_AuthorizationToken")
             .ok_or_else(|| Error::Config("CZ_AuthorizationToken required".into()))?
             .trim()
             .to_string();
-        let zones_raw = env.get("CZ_Zones")
+        let zones_raw = env
+            .get("CZ_Zones")
             .ok_or_else(|| Error::Config("CZ_Zones required".into()))?;
         let zones: Vec<String> = zones_raw
             .split(|c: char| c == ',' || c.is_whitespace())
@@ -34,14 +36,20 @@ impl DnsProvider for Czechia {
             .filter(|s| !s.is_empty())
             .collect();
         if zones.is_empty() {
-            return Err(Error::Config("CZ_Zones must contain at least one zone".into()));
+            return Err(Error::Config(
+                "CZ_Zones must contain at least one zone".into(),
+            ));
         }
         let api_base = env
             .get("CZ_API_BASE")
             .map(|s| s.trim_end_matches('/').to_string())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| DEFAULT_API_BASE.to_string());
-        Ok(Box::new(Czechia { auth_token, zones, api_base }))
+        Ok(Box::new(Czechia {
+            auth_token,
+            zones,
+            api_base,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -113,10 +121,10 @@ impl Czechia {
         let fd = domain.to_lowercase().trim_end_matches('.').to_string();
         let mut best: Option<&str> = None;
         for z in &self.zones {
-            if fd == *z || fd.ends_with(&format!(".{z}")) {
-                if best.is_none_or(|b| z.len() > b.len()) {
-                    best = Some(z.as_str());
-                }
+            if (fd == *z || fd.ends_with(&format!(".{z}")))
+                && best.is_none_or(|b| z.len() > b.len())
+            {
+                best = Some(z.as_str());
             }
         }
         best.map(|s| s.to_string())

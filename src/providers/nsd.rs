@@ -19,7 +19,9 @@ impl DnsProvider for Nsd {
     }
 
     fn add_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Err(Error::Provider("NLnetLabs NSD uses DNS UPDATE protocol. Use nsupdate.".into()))
+        Err(Error::Provider(
+            "NLnetLabs NSD uses DNS UPDATE protocol. Use nsupdate.".into(),
+        ))
     }
 
     fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {

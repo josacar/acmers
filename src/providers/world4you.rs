@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 const BASE_URL: &str = "https://my.world4you.com/en";
@@ -21,10 +22,14 @@ impl DnsProvider for World4you {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("WORLD4YOU_Username")
-            .ok_or_else(|| Error::Config("WORLD4YOU_Username required".into()))?.clone();
-        let password = env.get("WORLD4YOU_Password")
-            .ok_or_else(|| Error::Config("WORLD4YOU_Password required".into()))?.clone();
+        let username = env
+            .get("WORLD4YOU_Username")
+            .ok_or_else(|| Error::Config("WORLD4YOU_Username required".into()))?
+            .clone();
+        let password = env
+            .get("WORLD4YOU_Password")
+            .ok_or_else(|| Error::Config("WORLD4YOU_Password required".into()))?
+            .clone();
         Ok(Box::new(World4you { username, password }))
     }
 
@@ -40,14 +45,24 @@ impl DnsProvider for World4you {
         let form_iddp = extract_form_value(&form_resp.body, "AddDnsRecordForm[uniqueFormIdDP]")
             .ok_or_else(|| Error::Provider("world4you: cannot parse uniqueFormIdDP".into()))?;
         let form_token = extract_form_value(&form_resp.body, "AddDnsRecordForm[_token]")
-            .ok_or_else(|| Error::Provider("world4you: cannot parse AddDnsRecordForm[_token]".into()))?;
+            .ok_or_else(|| {
+                Error::Provider("world4you: cannot parse AddDnsRecordForm[_token]".into())
+            })?;
 
         let body = format!(
             "AddDnsRecordForm[name]={}&AddDnsRecordForm[dnsType][type]=TXT&AddDnsRecordForm[value]={}&AddDnsRecordForm[uniqueFormIdDP]={}&AddDnsRecordForm[_token]={}",
-            url_encode(&record_name), url_encode(value), url_encode(&form_iddp), url_encode(&form_token)
+            helpers::url_encode_form(&record_name),
+            helpers::url_encode_form(value),
+            helpers::url_encode_form(&form_iddp),
+            helpers::url_encode_form(&form_token)
         );
-        let resp = http::post(&url, body.as_bytes(), "application/x-www-form-urlencoded", &[("Cookie", &cookie)])
-            .map_err(|e| Error::Provider(format!("world4you add TXT post: {e}")))?;
+        let resp = http::post(
+            &url,
+            body.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[("Cookie", &cookie)],
+        )
+        .map_err(|e| Error::Provider(format!("world4you add TXT post: {e}")))?;
 
         if resp.status == 302 || resp.body.contains("successfully") {
             let check = http::get(&url, &[("Cookie", &cookie)])
@@ -60,7 +75,9 @@ impl DnsProvider for World4you {
             let msg = extract_error_message(&resp.body).unwrap_or_else(|| "unknown error".into());
             return Err(Error::Provider(format!("world4you add TXT failed: {msg}")));
         }
-        Err(Error::Provider("world4you: failed to add TXT record".into()))
+        Err(Error::Provider(
+            "world4you: failed to add TXT record".into(),
+        ))
     }
 
     fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -81,10 +98,11 @@ impl DnsProvider for World4you {
             Err(_) => return Ok(()),
         };
 
-        let form_iddp = match extract_form_value(&form_resp.body, "DeleteDnsRecordForm[uniqueFormIdDP]") {
-            Some(v) => v,
-            None => return Ok(()),
-        };
+        let form_iddp =
+            match extract_form_value(&form_resp.body, "DeleteDnsRecordForm[uniqueFormIdDP]") {
+                Some(v) => v,
+                None => return Ok(()),
+            };
         let form_token = match extract_form_value(&form_resp.body, "DeleteDnsRecordForm[_token]") {
             Some(v) => v,
             None => return Ok(()),
@@ -98,9 +116,16 @@ impl DnsProvider for World4you {
         let del_url = format!("{BASE_URL}/{paketnr}/dns/record/delete");
         let body = format!(
             "DeleteDnsRecordForm[id]={}&DeleteDnsRecordForm[uniqueFormIdDP]={}&DeleteDnsRecordForm[_token]={}",
-            url_encode(&record_id), url_encode(&form_iddp), url_encode(&form_token)
+            helpers::url_encode_form(&record_id),
+            helpers::url_encode_form(&form_iddp),
+            helpers::url_encode_form(&form_token)
         );
-        let resp = match http::post(&del_url, body.as_bytes(), "application/x-www-form-urlencoded", &[("Cookie", &cookie)]) {
+        let resp = match http::post(
+            &del_url,
+            body.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[("Cookie", &cookie)],
+        ) {
             Ok(r) => r,
             Err(_) => return Ok(()),
         };
@@ -128,11 +153,17 @@ impl World4you {
         let cookie = format!("W4YSESSID={sessid}");
         let body = format!(
             "_username={}&_password={}&_csrf_token={}",
-            url_encode(&self.username), url_encode(&self.password), url_encode(&csrf_token)
+            helpers::url_encode_form(&self.username),
+            helpers::url_encode_form(&self.password),
+            helpers::url_encode_form(&csrf_token)
         );
-        let resp = http::post(&login_url, body.as_bytes(), "application/x-www-form-urlencoded",
-            &[("Cookie", &cookie), ("X-Requested-With", "XMLHttpRequest")])
-            .map_err(|e| Error::Provider(format!("world4you login post: {e}")))?;
+        let resp = http::post(
+            &login_url,
+            body.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[("Cookie", &cookie), ("X-Requested-With", "XMLHttpRequest")],
+        )
+        .map_err(|e| Error::Provider(format!("world4you login post: {e}")))?;
 
         if !resp.body.contains("\"success\":true") && !resp.body.contains("\"success\": true") {
             let msg = extract_json_message(&resp.body).unwrap_or_else(|| "unknown error".into());
@@ -151,19 +182,25 @@ impl World4you {
         let mut pos = 0;
 
         while pos < resp.body.len() {
-            let Some(rel) = resp.body[pos..].find("\"fqdn\":\"") else { break };
+            let Some(rel) = resp.body[pos..].find("\"fqdn\":\"") else {
+                break;
+            };
             let abs_fqdn_pos = pos + rel;
             let fqdn_start = abs_fqdn_pos + 8;
-            let Some(fqdn_end) = resp.body[fqdn_start..].find('"') else { break };
+            let Some(fqdn_end) = resp.body[fqdn_start..].find('"') else {
+                break;
+            };
             let domain = &resp.body[fqdn_start..fqdn_start + fqdn_end];
 
             if fqdn_lower == domain || fqdn_lower.ends_with(&format!(".{domain}")) {
-                let search_start = if abs_fqdn_pos > 500 { abs_fqdn_pos - 500 } else { 0 };
+                let search_start = abs_fqdn_pos.saturating_sub(500);
                 let context = &resp.body[search_start..abs_fqdn_pos];
                 if let Some(id_rel) = context.rfind("\"id\":") {
                     let id_start = search_start + id_rel + 5;
                     let id_str = &resp.body[id_start..];
-                    let id_end = id_str.find(|c: char| !c.is_ascii_digit()).unwrap_or(id_str.len());
+                    let id_end = id_str
+                        .find(|c: char| !c.is_ascii_digit())
+                        .unwrap_or(id_str.len());
                     if id_end > 0 {
                         let paketnr = &id_str[..id_end];
                         let record_name = if fqdn_lower == domain {
@@ -178,7 +215,9 @@ impl World4you {
             pos = fqdn_start + fqdn_end + 1;
         }
 
-        Err(Error::Provider(format!("world4you: zone not found for {fqdn}")))
+        Err(Error::Provider(format!(
+            "world4you: zone not found for {fqdn}"
+        )))
     }
 }
 
@@ -189,13 +228,17 @@ fn extract_sessid(resp: &http::Response) -> Option<String> {
     let rest = &set_cookie[start..];
     let end = rest.find(';').unwrap_or(rest.len());
     let sessid = &rest[..end];
-    if sessid.is_empty() { None } else { Some(sessid.to_string()) }
+    if sessid.is_empty() {
+        None
+    } else {
+        Some(sessid.to_string())
+    }
 }
 
 fn extract_input_value(html: &str, name: &str) -> Option<String> {
     let pattern = format!("name=\"{name}\"");
     let pos = html.find(&pattern)?;
-    let search_start = if pos > 300 { pos - 300 } else { 0 };
+    let search_start = pos.saturating_sub(300);
     let search_end = (pos + pattern.len() + 300).min(html.len());
     let context = &html[search_start..search_end];
     let val_pos = context.find("value=\"")?;
@@ -207,7 +250,7 @@ fn extract_input_value(html: &str, name: &str) -> Option<String> {
 fn extract_form_value(html: &str, field_name: &str) -> Option<String> {
     let pattern = format!("name=\"{field_name}\"");
     let pos = html.find(&pattern)?;
-    let search_start = if pos > 300 { pos - 300 } else { 0 };
+    let search_start = pos.saturating_sub(300);
     let search_end = (pos + pattern.len() + 300).min(html.len());
     let context = &html[search_start..search_end];
     let val_pos = context.find("value=\"")?;
@@ -229,20 +272,21 @@ fn find_record_id(html: &str, fqdn: &str, value: &str) -> Option<String> {
         let obj_end = search[obj_start..].find('}')?;
         let record = &search[obj_start..obj_start + obj_end + 1];
 
-        if record.contains(&format!("\"type\":\"TXT\""))
+        if record.contains(&"\"type\":\"TXT\"".to_string())
             && record.contains(&format!("\"name\":\"{fqdn}\""))
             && record.contains(&format!("\"value\":\"{value}\""))
+            && let Some(id_pos) = record.find("\"id\":\"")
         {
-            if let Some(id_pos) = record.find("\"id\":\"") {
-                let id_start = id_pos + 6;
-                if let Some(id_end) = record[id_start..].find('"') {
-                    return Some(record[id_start..id_start + id_end].to_string());
-                }
+            let id_start = id_pos + 6;
+            if let Some(id_end) = record[id_start..].find('"') {
+                return Some(record[id_start..id_start + id_end].to_string());
             }
         }
 
         let next = obj_start + obj_end + 1;
-        if next >= search.len() { break; }
+        if next >= search.len() {
+            break;
+        }
         search = &search[next..];
     }
     None
@@ -261,25 +305,9 @@ fn extract_error_message(html: &str) -> Option<String> {
     let tag_start = after.find('>')? + 1;
     let tag_end = after[tag_start..].find('<')?;
     let msg = after[tag_start..tag_start + tag_end].trim();
-    if msg.is_empty() { None } else { Some(msg.to_string()) }
-}
-
-fn url_encode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for b in s.bytes() {
-        match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
-            b' ' => out.push('+'),
-            _ => {
-                out.push('%');
-                out.push(hex((b >> 4) & 0xf));
-                out.push(hex(b & 0xf));
-            }
-        }
+    if msg.is_empty() {
+        None
+    } else {
+        Some(msg.to_string())
     }
-    out
-}
-
-fn hex(n: u8) -> char {
-    if n < 10 { (b'0' + n) as char } else { (b'A' + n - 10) as char }
 }

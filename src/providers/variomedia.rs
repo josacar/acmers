@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for Variomedia {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("VARIOMEDIA_API_TOKEN")
+        let token = env
+            .get("VARIOMEDIA_API_TOKEN")
             .ok_or_else(|| Error::Config("VARIOMEDIA_API_TOKEN required".into()))?
             .clone();
         Ok(Box::new(Variomedia { token }))
@@ -44,11 +45,20 @@ impl DnsProvider for Variomedia {
                     "ttl": 300
                 }
             }
-        })).unwrap();
-        let resp = http::post("https://api.variomedia.de/dns-records", &body, "application/vnd.api+json", headers)
-            .map_err(|e| Error::Provider(format!("Variomedia add TXT: {e}")))?;
+        }))
+        .unwrap();
+        let resp = http::post(
+            "https://api.variomedia.de/dns-records",
+            &body,
+            "application/vnd.api+json",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("Variomedia add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Variomedia add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Variomedia add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -64,7 +74,10 @@ impl DnsProvider for Variomedia {
             ("Authorization", &auth),
             ("Accept", "application/vnd.variomedia.v1+json"),
         ];
-        let list_url = format!("https://api.variomedia.de/dns-records?filter[domain]={}", root);
+        let list_url = format!(
+            "https://api.variomedia.de/dns-records?filter[domain]={}",
+            root
+        );
         let resp = match http::get(&list_url, headers) {
             Ok(r) => r,
             Err(_) => return Ok(()),
@@ -81,13 +94,18 @@ impl DnsProvider for Variomedia {
                 };
                 let rec_name = attrs.get("name").and_then(|n| n.as_str()).unwrap_or("");
                 let rec_data = attrs.get("data").and_then(|d| d.as_str()).unwrap_or("");
-                if rec_name == sub && rec_data == value {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.variomedia.de/dns-records/{}", id);
-                        let _ = http::delete(&del_url, headers);
-                    }
+                if rec_name == sub
+                    && rec_data == value
+                    && let Some(id) = record.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
+                {
+                    let del_url = format!("https://api.variomedia.de/dns-records/{}", id);
+                    let _ = http::delete(&del_url, headers);
                 }
             }
         }
@@ -106,16 +124,13 @@ impl Variomedia {
         for i in 0..parts.len() {
             let candidate = parts[i..].join(".");
             let url = format!("https://api.variomedia.de/domains/{}", candidate);
-            if let Ok(resp) = http::get(&url, &headers) {
-                if let Ok(v) = serde_json::from_str::<Value>(&resp.body) {
-                    if let Some(data) = v.get("data") {
-                        if let Some(id) = data.get("id").and_then(|i| i.as_str()) {
-                            if id == candidate {
-                                return Ok(candidate);
-                            }
-                        }
-                    }
-                }
+            if let Ok(resp) = http::get(&url, headers)
+                && let Ok(v) = serde_json::from_str::<Value>(&resp.body)
+                && let Some(data) = v.get("data")
+                && let Some(id) = data.get("id").and_then(|i| i.as_str())
+                && id == candidate
+            {
+                return Ok(candidate);
             }
         }
         Err(Error::Provider(format!("domain not found: {domain}")))

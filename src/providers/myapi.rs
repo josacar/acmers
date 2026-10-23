@@ -19,10 +19,12 @@ impl DnsProvider for Myapi {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("MYAPI_Token")
+        let token = env
+            .get("MYAPI_Token")
             .ok_or_else(|| Error::Config("MYAPI_Token required".into()))?
             .clone();
-        let endpoint = env.get("MYAPI_Endpoint")
+        let endpoint = env
+            .get("MYAPI_Endpoint")
             .ok_or_else(|| Error::Config("MYAPI_Endpoint required".into()))?
             .trim_end_matches('/')
             .to_string();
@@ -37,11 +39,18 @@ impl DnsProvider for Myapi {
         });
         let url = format!("{}/add_txt", self.endpoint);
         let auth = format!("Bearer {}", self.token);
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[
-            ("Authorization", &auth),
-        ]).map_err(|e| Error::Provider(format!("myapi add_txt: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("myapi add_txt: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("myapi add_txt: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "myapi add_txt: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -54,11 +63,18 @@ impl DnsProvider for Myapi {
         });
         let url = format!("{}/remove_txt", self.endpoint);
         let auth = format!("Bearer {}", self.token);
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[
-            ("Authorization", &auth),
-        ]).map_err(|e| Error::Provider(format!("myapi remove_txt: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("myapi remove_txt: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("myapi remove_txt: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "myapi remove_txt: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }

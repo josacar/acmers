@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -20,10 +20,12 @@ impl DnsProvider for Godaddy {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("GD_Key")
+        let key = env
+            .get("GD_Key")
             .ok_or_else(|| Error::Config("GD_Key required".into()))?
             .clone();
-        let secret = env.get("GD_Secret")
+        let secret = env
+            .get("GD_Secret")
             .ok_or_else(|| Error::Config("GD_Secret required".into()))?
             .clone();
         Ok(Box::new(Godaddy { key, secret }))

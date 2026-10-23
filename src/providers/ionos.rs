@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -20,11 +20,16 @@ impl DnsProvider for Ionos {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let prefix = env.get("IONOS_PREFIX")
-            .ok_or_else(|| Error::Config("IONOS_PREFIX required".into()))?.clone();
-        let secret = env.get("IONOS_SECRET")
-            .ok_or_else(|| Error::Config("IONOS_SECRET required".into()))?.clone();
-        let endpoint = env.get("IONOS_ENDPOINT")
+        let prefix = env
+            .get("IONOS_PREFIX")
+            .ok_or_else(|| Error::Config("IONOS_PREFIX required".into()))?
+            .clone();
+        let secret = env
+            .get("IONOS_SECRET")
+            .ok_or_else(|| Error::Config("IONOS_SECRET required".into()))?
+            .clone();
+        let endpoint = env
+            .get("IONOS_ENDPOINT")
             .cloned()
             .unwrap_or_else(|| "https://api.hosting.ionos.com/dns/v1".to_string());
         let api_key = format!("{prefix}.{secret}");
@@ -40,9 +45,13 @@ impl DnsProvider for Ionos {
             "content": value,
             "ttl": 120,
         });
-        http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("X-API-Key", &self.api_key)])
-            .map_err(|e| Error::Provider(format!("ionos add TXT: {e}")))?;
+        http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("X-API-Key", &self.api_key)],
+        )
+        .map_err(|e| Error::Provider(format!("ionos add TXT: {e}")))?;
         Ok(())
     }
 
@@ -67,19 +76,23 @@ impl Ionos {
             .map_err(|e| Error::Json(format!("ionos zones: {e}")))?;
         if let Some(arr) = v.as_array() {
             for z in arr {
-                if let Some(nm) = z.get("name").and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        if let Some(id) = z.get("id").and_then(|i| i.as_str()) {
-                            return Ok(id.to_string());
-                        }
-                    }
+                if let Some(nm) = z.get("name").and_then(|n| n.as_str())
+                    && (domain == nm || domain.ends_with(&format!(".{nm}")))
+                    && let Some(id) = z.get("id").and_then(|i| i.as_str())
+                {
+                    return Ok(id.to_string());
                 }
             }
         }
         Err(Error::Provider(format!("zone not found for {domain}")))
     }
 
-    fn find_record_id(&self, zone_id: &str, name: &str, value: &str) -> Result<Option<String>, Error> {
+    fn find_record_id(
+        &self,
+        zone_id: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<Option<String>, Error> {
         let url = format!("{}/zones/{zone_id}/records", self.endpoint);
         let resp = http::get(&url, &[("X-API-Key", &self.api_key)])
             .map_err(|e| Error::Provider(format!("ionos list records: {e}")))?;
@@ -90,10 +103,9 @@ impl Ionos {
                 if r.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && r.get("name").and_then(|n| n.as_str()) == Some(name)
                     && r.get("content").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = r.get("id").and_then(|i| i.as_str())
                 {
-                    if let Some(id) = r.get("id").and_then(|i| i.as_str()) {
-                        return Ok(Some(id.to_string()));
-                    }
+                    return Ok(Some(id.to_string()));
                 }
             }
         }

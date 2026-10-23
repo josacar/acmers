@@ -12,14 +12,22 @@ pub struct Subreg {
 }
 
 impl DnsProvider for Subreg {
-    fn slug() -> &'static str { "subreg" }
-    fn env_vars() -> &'static [&'static str] { &["SUBREG_API_USERNAME", "SUBREG_API_PASSWORD"] }
+    fn slug() -> &'static str {
+        "subreg"
+    }
+    fn env_vars() -> &'static [&'static str] {
+        &["SUBREG_API_USERNAME", "SUBREG_API_PASSWORD"]
+    }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("SUBREG_API_USERNAME")
-            .ok_or_else(|| Error::Config("SUBREG_API_USERNAME required".into()))?.clone();
-        let password = env.get("SUBREG_API_PASSWORD")
-            .ok_or_else(|| Error::Config("SUBREG_API_PASSWORD required".into()))?.clone();
+        let username = env
+            .get("SUBREG_API_USERNAME")
+            .ok_or_else(|| Error::Config("SUBREG_API_USERNAME required".into()))?
+            .clone();
+        let password = env
+            .get("SUBREG_API_PASSWORD")
+            .ok_or_else(|| Error::Config("SUBREG_API_PASSWORD required".into()))?
+            .clone();
         Ok(Box::new(Subreg { username, password }))
     }
 
@@ -28,7 +36,9 @@ impl DnsProvider for Subreg {
         let (sub_domain, zone) = self.get_root(&ssid, name)?;
         let inner = format!(
             "<domain>{zone}</domain><record><name>{sub}</name><type>TXT</type><content>{val}</content><prio>0</prio><ttl>120</ttl></record>",
-            zone = zone, sub = sub_domain, val = value,
+            zone = zone,
+            sub = sub_domain,
+            val = value,
         );
         let resp = self.soap_auth(&ssid, "Add_DNS_Record", &inner)?;
         if !soap_is_ok(&resp) {
@@ -55,7 +65,10 @@ impl DnsProvider for Subreg {
             Some(id) => id,
             None => return Ok(()),
         };
-        let del_inner = format!("<domain>{}</domain><record><id>{}</id></record>", zone, record_id);
+        let del_inner = format!(
+            "<domain>{}</domain><record><id>{}</id></record>",
+            zone, record_id
+        );
         let _ = self.soap_auth(&ssid, "Delete_DNS_Record", &del_inner);
         Ok(())
     }
@@ -63,7 +76,10 @@ impl DnsProvider for Subreg {
 
 impl Subreg {
     fn login(&self) -> Result<String, Error> {
-        let inner = format!("<login>{}</login><password>{}</password>", self.username, self.password);
+        let inner = format!(
+            "<login>{}</login><password>{}</password>",
+            self.username, self.password
+        );
         let resp = self.soap_raw("Login", &inner)?;
         if !soap_is_ok(&resp) {
             return Err(Error::Provider(format!("subreg login: {resp}")));
@@ -75,16 +91,24 @@ impl Subreg {
         let parts: Vec<&str> = fulldomain.split('.').collect();
         for i in 0..parts.len() {
             let h = parts[i..].join(".");
-            if h.is_empty() { continue; }
+            if h.is_empty() {
+                continue;
+            }
             let inner = format!("<domain>{}</domain>", h);
-            if let Ok(resp) = self.soap_auth(ssid, "Get_DNS_Zone", &inner) {
-                if soap_is_ok(&resp) {
-                    let sub = if i == 0 { String::new() } else { parts[..i].join(".") };
-                    return Ok((sub, h));
-                }
+            if let Ok(resp) = self.soap_auth(ssid, "Get_DNS_Zone", &inner)
+                && soap_is_ok(&resp)
+            {
+                let sub = if i == 0 {
+                    String::new()
+                } else {
+                    parts[..i].join(".")
+                };
+                return Ok((sub, h));
             }
         }
-        Err(Error::Provider(format!("subreg: zone not found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "subreg: zone not found for {fulldomain}"
+        )))
     }
 
     fn soap_auth(&self, ssid: &str, cmd: &str, inner: &str) -> Result<String, Error> {
@@ -107,11 +131,18 @@ impl Subreg {
              </SOAP-ENV:Envelope>"
         );
         let action = format!("http://soap.subreg.cz/soap#{cmd}");
-        let resp = http::post(API_URL, body.as_bytes(), "text/xml", &[
-            ("SOAPAction", &action),
-        ]).map_err(|e| Error::Provider(format!("subreg {cmd}: {e}")))?;
+        let resp = http::post(
+            API_URL,
+            body.as_bytes(),
+            "text/xml",
+            &[("SOAPAction", &action)],
+        )
+        .map_err(|e| Error::Provider(format!("subreg {cmd}: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("subreg {cmd}: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "subreg {cmd}: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(resp.body)
     }
@@ -139,15 +170,19 @@ fn find_record_id(xml: &str, name: &str, value: &str) -> Option<String> {
         let after_tag = &xml[abs + name_key.len()..];
         if let Some(gt) = after_tag.find('>') {
             let content = &after_tag[gt + 1..];
-            if let Some(end) = content.find("</value>") {
-                if &content[..end] == name {
-                    let before = &xml[..abs];
-                    let record_id = find_last_id(before);
-                    let after = &content[end..];
-                    let window = if after.len() > 1000 { &after[..1000] } else { after };
-                    if soap_key_eq(window, "type", "TXT") && soap_key_eq(window, "content", value) {
-                        return record_id;
-                    }
+            if let Some(end) = content.find("</value>")
+                && &content[..end] == name
+            {
+                let before = &xml[..abs];
+                let record_id = find_last_id(before);
+                let after = &content[end..];
+                let window = if after.len() > 1000 {
+                    &after[..1000]
+                } else {
+                    after
+                };
+                if soap_key_eq(window, "type", "TXT") && soap_key_eq(window, "content", value) {
+                    return record_id;
                 }
             }
         }

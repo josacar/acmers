@@ -23,16 +23,23 @@ impl DnsProvider for Dnsexit {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("DNSEXIT_API_KEY")
+        let api_key = env
+            .get("DNSEXIT_API_KEY")
             .ok_or_else(|| Error::Config("DNSEXIT_API_KEY required".into()))?
             .clone();
-        let auth_user = env.get("DNSEXIT_AUTH_USER")
+        let auth_user = env
+            .get("DNSEXIT_AUTH_USER")
             .ok_or_else(|| Error::Config("DNSEXIT_AUTH_USER required".into()))?
             .clone();
-        let auth_pass = env.get("DNSEXIT_AUTH_PASS")
+        let auth_pass = env
+            .get("DNSEXIT_AUTH_PASS")
             .ok_or_else(|| Error::Config("DNSEXIT_AUTH_PASS required".into()))?
             .clone();
-        Ok(Box::new(Dnsexit { api_key, auth_user, auth_pass }))
+        Ok(Box::new(Dnsexit {
+            api_key,
+            auth_user,
+            auth_pass,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -78,7 +85,10 @@ impl DnsProvider for Dnsexit {
         )
         .map_err(|e| Error::Provider(format!("DNSExit remove TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("DNSExit remove TXT: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "DNSExit remove TXT: {}",
+                resp.body
+            )));
         }
         Ok(())
     }
@@ -118,7 +128,9 @@ fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }

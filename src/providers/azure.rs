@@ -23,23 +23,37 @@ impl DnsProvider for Azure {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["AZUREDNS_SUBSCRIPTIONID", "AZUREDNS_TENANTID", "AZUREDNS_APPID", "AZUREDNS_CLIENTSECRET"]
+        &[
+            "AZUREDNS_SUBSCRIPTIONID",
+            "AZUREDNS_TENANTID",
+            "AZUREDNS_APPID",
+            "AZUREDNS_CLIENTSECRET",
+        ]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let subscription_id = env.get("AZUREDNS_SUBSCRIPTIONID")
+        let subscription_id = env
+            .get("AZUREDNS_SUBSCRIPTIONID")
             .ok_or_else(|| Error::Config("AZUREDNS_SUBSCRIPTIONID required".into()))?
             .clone();
-        let tenant_id = env.get("AZUREDNS_TENANTID")
+        let tenant_id = env
+            .get("AZUREDNS_TENANTID")
             .ok_or_else(|| Error::Config("AZUREDNS_TENANTID required".into()))?
             .clone();
-        let app_id = env.get("AZUREDNS_APPID")
+        let app_id = env
+            .get("AZUREDNS_APPID")
             .ok_or_else(|| Error::Config("AZUREDNS_APPID required".into()))?
             .clone();
-        let client_secret = env.get("AZUREDNS_CLIENTSECRET")
+        let client_secret = env
+            .get("AZUREDNS_CLIENTSECRET")
             .ok_or_else(|| Error::Config("AZUREDNS_CLIENTSECRET required".into()))?
             .clone();
-        Ok(Box::new(Azure { subscription_id, tenant_id, app_id, client_secret }))
+        Ok(Box::new(Azure {
+            subscription_id,
+            tenant_id,
+            app_id,
+            client_secret,
+        }))
     }
 
     fn add_txt(&self, domain: &str, _name: &str, value: &str) -> ProviderResult {
@@ -54,17 +68,17 @@ impl DnsProvider for Azure {
         let mut records = vec![serde_json::json!({"value": [value]})];
 
         let existing = http::get(&url, &[("Authorization", &auth)]);
-        if let Ok(ref resp) = existing {
-            if resp.status == 200 {
-                if let Ok(v) = serde_json::from_str::<Value>(&resp.body) {
-                    if let Some(arr) = v.pointer("/properties/TXTRecords").and_then(|a| a.as_array()) {
-                        for entry in arr {
-                            if let Some(val_arr) = entry.get("value").and_then(|v| v.as_array()) {
-                                for val in val_arr {
-                                    records.push(serde_json::json!({"value": [val]}));
-                                }
-                            }
-                        }
+        if let Ok(ref resp) = existing
+            && resp.status == 200
+            && let Ok(v) = serde_json::from_str::<Value>(&resp.body)
+            && let Some(arr) = v
+                .pointer("/properties/TXTRecords")
+                .and_then(|a| a.as_array())
+        {
+            for entry in arr {
+                if let Some(val_arr) = entry.get("value").and_then(|v| v.as_array()) {
+                    for val in val_arr {
+                        records.push(serde_json::json!({"value": [val]}));
                     }
                 }
             }
@@ -76,11 +90,19 @@ impl DnsProvider for Azure {
                 "TXTRecords": records
             }
         });
-        let resp = http::put(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("Azure add TXT: {e}")))?;
+        let resp = http::put(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("Azure add TXT: {e}")))?;
 
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("Azure add TXT: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Azure add TXT: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -115,14 +137,17 @@ impl DnsProvider for Azure {
         };
 
         let mut remaining = Vec::new();
-        if let Some(arr) = v.pointer("/properties/TXTRecords").and_then(|a| a.as_array()) {
+        if let Some(arr) = v
+            .pointer("/properties/TXTRecords")
+            .and_then(|a| a.as_array())
+        {
             for entry in arr {
                 if let Some(val_arr) = entry.get("value").and_then(|v| v.as_array()) {
                     for val in val_arr {
-                        if let Some(s) = val.as_str() {
-                            if s != value {
-                                remaining.push(serde_json::json!({"value": [s]}));
-                            }
+                        if let Some(s) = val.as_str()
+                            && s != value
+                        {
+                            remaining.push(serde_json::json!({"value": [s]}));
                         }
                     }
                 }
@@ -138,7 +163,12 @@ impl DnsProvider for Azure {
                     "TXTRecords": remaining
                 }
             });
-            let _ = http::put(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Authorization", &auth)]);
+            let _ = http::put(
+                &url,
+                &serde_json::to_vec(&body).unwrap(),
+                "application/json",
+                &[("Authorization", &auth)],
+            );
         }
         Ok(())
     }
@@ -154,13 +184,18 @@ impl Azure {
             .map_err(|e| Error::Provider(format!("Azure list zones: {e}")))?;
 
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("Azure list zones: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Azure list zones: {} {}",
+                resp.status, resp.body
+            )));
         }
 
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Azure zones: {e}")))?;
 
-        let zones = v.get("value").and_then(|z| z.as_array())
+        let zones = v
+            .get("value")
+            .and_then(|z| z.as_array())
             .ok_or_else(|| Error::Provider("Azure zones: no value array".into()))?;
 
         let mut best_id = String::new();
@@ -200,17 +235,28 @@ impl Azure {
 
 fn get_token(tenant_id: &str, app_id: &str, client_secret: &str) -> Result<String, Error> {
     let url = format!("{TOKEN_URL}/{tenant_id}/oauth2/token");
-    let body = format!("resource=https%3A%2F%2Fmanagement.core.windows.net%2F&client_id={app_id}&client_secret={client_secret}&grant_type=client_credentials");
-    let resp = http::post(&url, body.as_bytes(), "application/x-www-form-urlencoded", &[])
-        .map_err(|e| Error::Provider(format!("Azure auth: {e}")))?;
+    let body = format!(
+        "resource=https%3A%2F%2Fmanagement.core.windows.net%2F&client_id={app_id}&client_secret={client_secret}&grant_type=client_credentials"
+    );
+    let resp = http::post(
+        &url,
+        body.as_bytes(),
+        "application/x-www-form-urlencoded",
+        &[],
+    )
+    .map_err(|e| Error::Provider(format!("Azure auth: {e}")))?;
 
     if resp.status >= 300 {
-        return Err(Error::Provider(format!("Azure auth: {} {}", resp.status, resp.body)));
+        return Err(Error::Provider(format!(
+            "Azure auth: {} {}",
+            resp.status, resp.body
+        )));
     }
 
-    let v: Value = serde_json::from_str(&resp.body)
-        .map_err(|e| Error::Json(format!("Azure token: {e}")))?;
-    v.get("access_token").and_then(|t| t.as_str())
+    let v: Value =
+        serde_json::from_str(&resp.body).map_err(|e| Error::Json(format!("Azure token: {e}")))?;
+    v.get("access_token")
+        .and_then(|t| t.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| Error::Provider("no access_token in Azure response".into()))
 }

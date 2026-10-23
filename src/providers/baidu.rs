@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ring::digest::{digest, SHA256};
+use ring::digest::{SHA256, digest};
 use ring::hmac;
 
 use crate::base64;
@@ -26,10 +26,12 @@ impl DnsProvider for Baidu {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let ak = env.get("Baidu_AK")
+        let ak = env
+            .get("Baidu_AK")
             .ok_or_else(|| Error::Config("Baidu_AK required".into()))?
             .clone();
-        let sk = env.get("Baidu_SK")
+        let sk = env
+            .get("Baidu_SK")
             .ok_or_else(|| Error::Config("Baidu_SK required".into()))?
             .clone();
         Ok(Box::new(Baidu { ak, sk }))
@@ -48,7 +50,10 @@ impl DnsProvider for Baidu {
         let body_str = serde_json::to_string(&body).unwrap();
         let resp = self.signed_request("POST", "/v1/domain/resolve/add", body_str.as_bytes())?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("baidu add record: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "baidu add record: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         if resp.body.contains("\"code\"") && resp.body.contains("\"message\"") {
             return Err(Error::Provider(format!("baidu add record: {}", resp.body)));
@@ -88,10 +93,11 @@ impl Baidu {
                 "pageSize": 1,
             });
             let body_str = serde_json::to_string(&body).unwrap();
-            let resp = match self.signed_request("POST", "/v1/domain/resolve/list", body_str.as_bytes()) {
-                Ok(r) => r,
-                Err(_) => continue,
-            };
+            let resp =
+                match self.signed_request("POST", "/v1/domain/resolve/list", body_str.as_bytes()) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
             if resp.status >= 400 {
                 continue;
             }
@@ -107,10 +113,18 @@ impl Baidu {
                 return Ok((candidate, sub_domain));
             }
         }
-        Err(Error::Provider(format!("baidu: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "baidu: zone not found for {domain}"
+        )))
     }
 
-    fn find_record_ids(&self, zone_name: &str, record_domain: &str, rd_type: &str, rdata: &str) -> Result<Vec<String>, Error> {
+    fn find_record_ids(
+        &self,
+        zone_name: &str,
+        record_domain: &str,
+        rd_type: &str,
+        rdata: &str,
+    ) -> Result<Vec<String>, Error> {
         let mut ids = Vec::new();
         let mut page = 1;
         let page_size = 100;
@@ -122,44 +136,56 @@ impl Baidu {
                 "pageSize": page_size,
             });
             let body_str = serde_json::to_string(&body).unwrap();
-            let resp = self.signed_request("POST", "/v1/domain/resolve/list", body_str.as_bytes())
+            let resp = self
+                .signed_request("POST", "/v1/domain/resolve/list", body_str.as_bytes())
                 .map_err(|e| Error::Provider(format!("baidu list records: {e}")))?;
             if resp.status >= 400 {
-                return Err(Error::Provider(format!("baidu list records: HTTP {}", resp.status)));
+                return Err(Error::Provider(format!(
+                    "baidu list records: HTTP {}",
+                    resp.status
+                )));
             }
             if resp.body.contains("\"code\"") && resp.body.contains("\"message\"") {
-                return Err(Error::Provider(format!("baidu list records: {}", resp.body)));
+                return Err(Error::Provider(format!(
+                    "baidu list records: {}",
+                    resp.body
+                )));
             }
             let v: serde_json::Value = serde_json::from_str(&resp.body)
                 .map_err(|e| Error::Json(format!("baidu parse records: {e}")))?;
-            if page == 1 {
-                if let Some(total) = v.get("totalCount").and_then(|t| t.as_u64()) {
-                    max_page = ((total + page_size as u64 - 1) / page_size as u64).max(1) as usize;
-                }
+            if page == 1
+                && let Some(total) = v.get("totalCount").and_then(|t| t.as_u64())
+            {
+                max_page = total.div_ceil(page_size as u64).max(1) as usize;
             }
-            let records = v.get("result").and_then(|r| r.as_array())
+            let records = v
+                .get("result")
+                .and_then(|r| r.as_array())
                 .or_else(|| v.get("data").and_then(|d| d.as_array()))
                 .or_else(|| v.as_array());
             if let Some(records) = records {
                 for record in records {
                     let rec_domain = record.get("domain").and_then(|d| d.as_str()).unwrap_or("");
-                    let rec_type = record.get("rdType")
+                    let rec_type = record
+                        .get("rdType")
                         .or_else(|| record.get("rdtype"))
                         .and_then(|t| t.as_str())
                         .unwrap_or("");
                     let rec_rdata = record.get("rdata").and_then(|r| r.as_str()).unwrap_or("");
-                    let domain_match = rec_domain == record_domain
-                        || rec_domain == format!("{record_domain}.");
-                    if domain_match && rec_type == rd_type && rec_rdata == rdata {
-                        if let Some(id) = record.get("recordId").and_then(|i| {
+                    let domain_match =
+                        rec_domain == record_domain || rec_domain == format!("{record_domain}.");
+                    if domain_match
+                        && rec_type == rd_type
+                        && rec_rdata == rdata
+                        && let Some(id) = record.get("recordId").and_then(|i| {
                             if let Some(n) = i.as_u64() {
                                 Some(n.to_string())
                             } else {
                                 i.as_str().map(|s| s.to_string())
                             }
-                        }) {
-                            ids.push(id);
-                        }
+                        })
+                    {
+                        ids.push(id);
                     }
                 }
             }
@@ -171,12 +197,21 @@ impl Baidu {
         Ok(ids)
     }
 
-    fn signed_request(&self, method: &str, uri: &str, body: &[u8]) -> Result<http::Response, Error> {
+    fn signed_request(
+        &self,
+        method: &str,
+        uri: &str,
+        body: &[u8],
+    ) -> Result<http::Response, Error> {
         let now = time::OffsetDateTime::now_utc();
         let ts = format!(
             "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z",
-            now.year(), now.month() as u8, now.day(),
-            now.hour(), now.minute(), now.second()
+            now.year(),
+            now.month() as u8,
+            now.day(),
+            now.hour(),
+            now.minute(),
+            now.second()
         );
         let content_type = "application/json; charset=utf-8";
         let payload_hash = base64::hex(digest(&SHA256, body).as_ref());
@@ -224,7 +259,9 @@ impl Baidu {
                 .map_err(|e| Error::Provider(format!("baidu request: {e}"))),
             "GET" => http::get(&url, &headers)
                 .map_err(|e| Error::Provider(format!("baidu request: {e}"))),
-            _ => Err(Error::Provider(format!("baidu: unsupported method: {method}"))),
+            _ => Err(Error::Provider(format!(
+                "baidu: unsupported method: {method}"
+            ))),
         }
     }
 }

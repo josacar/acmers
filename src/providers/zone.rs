@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -20,10 +20,12 @@ impl DnsProvider for Zone {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("ZONE_Username")
+        let username = env
+            .get("ZONE_Username")
             .ok_or_else(|| Error::Config("ZONE_Username required".into()))?
             .clone();
-        let key = env.get("ZONE_Key")
+        let key = env
+            .get("ZONE_Key")
             .ok_or_else(|| Error::Config("ZONE_Key required".into()))?
             .clone();
         let creds = format!("{username}:{key}");
@@ -40,10 +42,18 @@ impl DnsProvider for Zone {
             "ttl": 120,
         });
         let url = format!("https://api.zone.eu/v2/dns/{domain}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
-            .map_err(|e| Error::Provider(format!("zone add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("zone add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("zone add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "zone add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -69,14 +79,17 @@ impl DnsProvider for Zone {
                 if r.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && r.get("name").and_then(|n| n.as_str()) == Some(name)
                     && r.get("destination").and_then(|d| d.as_str()) == Some(value)
+                    && let Some(id) = r.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = r.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.zone.eu/v2/dns/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url = format!("https://api.zone.eu/v2/dns/{domain}/records/{id}");
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }

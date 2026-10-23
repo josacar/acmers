@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -20,10 +20,12 @@ impl DnsProvider for Pointhq {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let email = env.get("PointHQ_Email")
+        let email = env
+            .get("PointHQ_Email")
             .ok_or_else(|| Error::Config("PointHQ_Email required".into()))?
             .clone();
-        let key = env.get("PointHQ_Key")
+        let key = env
+            .get("PointHQ_Key")
             .ok_or_else(|| Error::Config("PointHQ_Key required".into()))?
             .clone();
         let creds = format!("{email}:{key}");
@@ -44,12 +46,16 @@ impl DnsProvider for Pointhq {
                 "data": value,
                 "ttl": 3600,
             }
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.pointhq.com/zones/{zone_name}/records");
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("PointHQ add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("PointHQ add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "PointHQ add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -63,7 +69,9 @@ impl DnsProvider for Pointhq {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let list_url = format!("https://api.pointhq.com/zones/{zone_name}/records?record_type=TXT&name={sub_domain}");
+        let list_url = format!(
+            "https://api.pointhq.com/zones/{zone_name}/records?record_type=TXT&name={sub_domain}"
+        );
         let resp = match http::get(&list_url, headers) {
             Ok(r) => r,
             Err(_) => return Ok(()),
@@ -75,7 +83,11 @@ impl DnsProvider for Pointhq {
         if let Some(records) = v.as_array() {
             for record in records {
                 if let Some(id) = record.get("id").and_then(|i| {
-                    if let Some(n) = i.as_i64() { Some(n) } else { i.as_str().and_then(|s| s.parse().ok()) }
+                    if let Some(n) = i.as_i64() {
+                        Some(n)
+                    } else {
+                        i.as_str().and_then(|s| s.parse().ok())
+                    }
                 }) {
                     let del_url = format!("https://api.pointhq.com/zones/{zone_name}/records/{id}");
                     let _ = http::delete(&del_url, headers);
@@ -87,7 +99,11 @@ impl DnsProvider for Pointhq {
 }
 
 impl Pointhq {
-    fn resolve_zone(&self, fulldomain: &str, headers: &[(&str, &str)]) -> Result<(String, String), Error> {
+    fn resolve_zone(
+        &self,
+        fulldomain: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<(String, String), Error> {
         let parts: Vec<&str> = fulldomain.split('.').collect();
         let mut p = 1;
         let mut i = 2;

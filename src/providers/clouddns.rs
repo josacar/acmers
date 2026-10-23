@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -24,12 +24,18 @@ impl DnsProvider for Clouddns {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let client_id = env.get("CLOUDDNS_CLIENT_ID")
-            .ok_or_else(|| Error::Config("CLOUDDNS_CLIENT_ID required".into()))?.clone();
-        let email = env.get("CLOUDDNS_EMAIL")
-            .ok_or_else(|| Error::Config("CLOUDDNS_EMAIL required".into()))?.clone();
-        let password = env.get("CLOUDDNS_PASSWORD")
-            .ok_or_else(|| Error::Config("CLOUDDNS_PASSWORD required".into()))?.clone();
+        let client_id = env
+            .get("CLOUDDNS_CLIENT_ID")
+            .ok_or_else(|| Error::Config("CLOUDDNS_CLIENT_ID required".into()))?
+            .clone();
+        let email = env
+            .get("CLOUDDNS_EMAIL")
+            .ok_or_else(|| Error::Config("CLOUDDNS_EMAIL required".into()))?
+            .clone();
+        let password = env
+            .get("CLOUDDNS_PASSWORD")
+            .ok_or_else(|| Error::Config("CLOUDDNS_PASSWORD required".into()))?
+            .clone();
 
         let login_body = serde_json::json!({
             "email": email,
@@ -40,7 +46,8 @@ impl DnsProvider for Clouddns {
             &serde_json::to_vec(&login_body).unwrap(),
             "application/json",
             &[],
-        ).map_err(|e| Error::Provider(format!("clouddns login: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("clouddns login: {e}")))?;
 
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("clouddns login: {e}")))?;
@@ -60,12 +67,19 @@ impl DnsProvider for Clouddns {
             "domainId": domain_id,
         });
         let auth = format!("Bearer {}", self.token);
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[
-            ("Authorization", &auth),
-        ]).map_err(|e| Error::Provider(format!("clouddns add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("clouddns add TXT: {e}")))?;
 
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("clouddns add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "clouddns add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
 
         self.publish(&domain_id)?;
@@ -99,13 +113,12 @@ impl DnsProvider for Clouddns {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(record_name.as_str())
                     && record.get("value").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| i.as_str())
                 {
-                    if let Some(id) = record.get("id").and_then(|i| i.as_str()) {
-                        let del_url = format!("{API_BASE}/record/{id}");
-                        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
-                        self.publish(&domain_id)?;
-                        return Ok(());
-                    }
+                    let del_url = format!("{API_BASE}/record/{id}");
+                    let _ = http::delete(&del_url, &[("Authorization", &auth)]);
+                    self.publish(&domain_id)?;
+                    return Ok(());
                 }
             }
         }
@@ -118,9 +131,13 @@ impl Clouddns {
         let auth = format!("Bearer {}", self.token);
         let url = format!("{API_BASE}/domain/{domain_id}/publish");
         let body = serde_json::json!({"soaTtl": 300});
-        http::put(&url, &serde_json::to_vec(&body).unwrap(), "application/json", &[
-            ("Authorization", &auth),
-        ]).map_err(|e| Error::Provider(format!("clouddns publish: {e}")))?;
+        http::put(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("clouddns publish: {e}")))?;
         Ok(())
     }
 
@@ -135,21 +152,31 @@ impl Clouddns {
             &serde_json::to_vec(&search_body).unwrap(),
             "application/json",
             &[("Authorization", &auth)],
-        ).map_err(|e| Error::Provider(format!("clouddns domain search: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("clouddns domain search: {e}")))?;
 
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("clouddns domain search: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "clouddns domain search: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
 
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("clouddns domain search: {e}")))?;
 
-        let domains = v.as_array()
+        let domains = v
+            .as_array()
             .or_else(|| v.get("data").and_then(|d| d.as_array()))
             .ok_or_else(|| Error::Provider("clouddns domain search: unexpected response".into()))?;
 
-        let domain_names: Vec<String> = domains.iter()
-            .filter_map(|d| d.get("domainName").and_then(|n| n.as_str()).map(|s| s.to_string()))
+        let domain_names: Vec<String> = domains
+            .iter()
+            .filter_map(|d| {
+                d.get("domainName")
+                    .and_then(|n| n.as_str())
+                    .map(|s| s.to_string())
+            })
             .collect();
 
         let mut domain_root: Option<String> = None;
@@ -167,8 +194,8 @@ impl Clouddns {
             }
         }
 
-        let domain_root = domain_root
-            .ok_or_else(|| Error::Provider(format!("domain not found for {domain}")))?;
+        let domain_root =
+            domain_root.ok_or_else(|| Error::Provider(format!("domain not found for {domain}")))?;
 
         let search_body = serde_json::json!({
             "search": [
@@ -181,16 +208,21 @@ impl Clouddns {
             &serde_json::to_vec(&search_body).unwrap(),
             "application/json",
             &[("Authorization", &auth)],
-        ).map_err(|e| Error::Provider(format!("clouddns domain search: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("clouddns domain search: {e}")))?;
 
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("clouddns domain search: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "clouddns domain search: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
 
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("clouddns domain search: {e}")))?;
 
-        let domains = v.as_array()
+        let domains = v
+            .as_array()
             .or_else(|| v.get("data").and_then(|d| d.as_array()));
 
         if let Some(domains) = domains {
@@ -201,6 +233,8 @@ impl Clouddns {
             }
         }
 
-        Err(Error::Provider(format!("domain id not found for {domain_root}")))
+        Err(Error::Provider(format!(
+            "domain id not found for {domain_root}"
+        )))
     }
 }

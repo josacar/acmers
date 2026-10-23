@@ -21,15 +21,21 @@ impl DnsProvider for Mydnsjp {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let master_id = env.get("MYDNSJP_MasterID")
+        let master_id = env
+            .get("MYDNSJP_MasterID")
             .ok_or_else(|| Error::Config("MYDNSJP_MasterID required".into()))?
             .clone();
-        let password = env.get("MYDNSJP_MasterPassword")
+        let password = env
+            .get("MYDNSJP_MasterPassword")
             .ok_or_else(|| Error::Config("MYDNSJP_MasterPassword required".into()))?
             .clone();
         let creds = format!("{master_id}:{password}");
         let basic_auth = format!("Basic {}", base64::encode_std(creds.as_bytes()));
-        Ok(Box::new(Mydnsjp { master_id, password, basic_auth }))
+        Ok(Box::new(Mydnsjp {
+            master_id,
+            password,
+            basic_auth,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -54,13 +60,17 @@ impl DnsProvider for Mydnsjp {
 
 impl Mydnsjp {
     fn get_root_domain(&self) -> Result<String, Error> {
-        let data = format!("MENU=100&masterid={}&masterpwd={}", self.master_id, self.password);
+        let data = format!(
+            "MENU=100&masterid={}&masterpwd={}",
+            self.master_id, self.password
+        );
         let resp = http::post(
             "https://www.mydns.jp/members/",
             data.as_bytes(),
             "application/x-www-form-urlencoded",
             &[],
-        ).map_err(|e| Error::Provider(format!("MyDNS.JP login: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("MyDNS.JP login: {e}")))?;
         let domain = extract_value(&resp.body, "DNSINFO[domainname]")
             .ok_or_else(|| Error::Provider("MyDNS.JP: could not find root domain".into()))?;
         Ok(domain)
@@ -73,7 +83,8 @@ impl Mydnsjp {
             data.as_bytes(),
             "application/x-www-form-urlencoded",
             &[("Authorization", &self.basic_auth)],
-        ).map_err(|e| Error::Provider(format!("MyDNS.JP {cmd}: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("MyDNS.JP {cmd}: {e}")))?;
         if !resp.body.contains("OK.") {
             return Err(Error::Provider(format!("MyDNS.JP {cmd}: {}", resp.body)));
         }
@@ -82,7 +93,7 @@ impl Mydnsjp {
 }
 
 fn extract_value(body: &str, key: &str) -> Option<String> {
-    let needle = format!("{key}");
+    let needle = key.to_string();
     let pos = body.find(&needle)?;
     let rest = &body[pos + needle.len()..];
     let val_start = rest.find("value=\"")?;

@@ -18,7 +18,8 @@ impl DnsProvider for HeDdns {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("HE_DDNS_Key")
+        let key = env
+            .get("HE_DDNS_Key")
             .ok_or_else(|| Error::Config("HE_DDNS_Key required".into()))?
             .clone();
         Ok(Box::new(HeDdns { key }))
@@ -32,8 +33,8 @@ impl DnsProvider for HeDdns {
             urlencode(&self.key),
             urlencode(value),
         );
-        let resp = http::get(&url, &[])
-            .map_err(|e| Error::Provider(format!("HE DDNS add TXT: {e}")))?;
+        let resp =
+            http::get(&url, &[]).map_err(|e| Error::Provider(format!("HE DDNS add TXT: {e}")))?;
         if !resp.body.starts_with("good") && !resp.body.starts_with("nochg") {
             return Err(Error::Provider(format!("HE DDNS add TXT: {}", resp.body)));
         }
@@ -47,8 +48,7 @@ impl DnsProvider for HeDdns {
             urlencode(&hostname),
             urlencode(&self.key),
         );
-        http::get(&url, &[])
-            .map_err(|e| Error::Provider(format!("HE DDNS remove TXT: {e}")))?;
+        http::get(&url, &[]).map_err(|e| Error::Provider(format!("HE DDNS remove TXT: {e}")))?;
         Ok(())
     }
 }
@@ -57,7 +57,9 @@ fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{:02X}", b)),
         }
     }

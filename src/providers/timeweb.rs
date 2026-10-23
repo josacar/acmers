@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for Timeweb {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("TIMEWEB_Token")
+        let token = env
+            .get("TIMEWEB_Token")
             .ok_or_else(|| Error::Config("TIMEWEB_Token required".into()))?
             .clone();
         Ok(Box::new(Timeweb { token }))
@@ -34,12 +35,16 @@ impl DnsProvider for Timeweb {
             "subdomain": name,
             "value": value,
             "ttl": 120,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.timeweb.cloud/api/v1/domains/{domain_id}/dns-records");
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("Timeweb add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Timeweb add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Timeweb add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -60,7 +65,8 @@ impl DnsProvider for Timeweb {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records: Option<&Vec<Value>> = v.as_array()
+        let records: Option<&Vec<Value>> = v
+            .as_array()
             .or_else(|| v.get("dns_records").and_then(|r| r.as_array()))
             .or_else(|| v.get("records").and_then(|r| r.as_array()));
         if let Some(arr) = records {
@@ -68,13 +74,18 @@ impl DnsProvider for Timeweb {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("subdomain").and_then(|n| n.as_str()) == Some(name)
                     && record.get("value").and_then(|v| v.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.timeweb.cloud/api/v1/domains/{domain_id}/dns-records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                    }
+                    let del_url = format!(
+                        "https://api.timeweb.cloud/api/v1/domains/{domain_id}/dns-records/{id}"
+                    );
+                    let _ = http::delete(&del_url, headers);
                 }
             }
         }
@@ -88,18 +99,22 @@ impl Timeweb {
             .map_err(|e| Error::Provider(format!("Timeweb list domains: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Timeweb domains: {e}")))?;
-        let domains: Option<&Vec<Value>> = v.as_array()
+        let domains: Option<&Vec<Value>> = v
+            .as_array()
             .or_else(|| v.get("domains").and_then(|d| d.as_array()));
         if let Some(arr) = domains {
             for d in arr {
-                if let Some(fqdn) = d.get("fqdn").and_then(|n| n.as_str()) {
-                    if domain == fqdn || domain.ends_with(&format!(".{fqdn}")) {
-                        if let Some(id) = d.get("id").and_then(|i| {
-                            if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                        }) {
-                            return Ok(id);
+                if let Some(fqdn) = d.get("fqdn").and_then(|n| n.as_str())
+                    && (domain == fqdn || domain.ends_with(&format!(".{fqdn}")))
+                    && let Some(id) = d.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
                         }
-                    }
+                    })
+                {
+                    return Ok(id);
                 }
             }
         }

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -20,10 +20,12 @@ impl DnsProvider for Domeneshop {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("DOMENESHOP_Key")
+        let key = env
+            .get("DOMENESHOP_Key")
             .ok_or_else(|| Error::Config("DOMENESHOP_Key required".into()))?
             .clone();
-        let secret = env.get("DOMENESHOP_Secret")
+        let secret = env
+            .get("DOMENESHOP_Secret")
             .ok_or_else(|| Error::Config("DOMENESHOP_Secret required".into()))?
             .clone();
         let creds = format!("{key}:{secret}");
@@ -39,12 +41,16 @@ impl DnsProvider for Domeneshop {
             "host": name,
             "data": value,
             "ttl": 120,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.domeneshop.no/v0/domains/{domain_id}/dns");
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("Domeneshop add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Domeneshop add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Domeneshop add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -69,13 +75,17 @@ impl DnsProvider for Domeneshop {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("host").and_then(|h| h.as_str()) == Some(name)
                     && record.get("data").and_then(|d| d.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://api.domeneshop.no/v0/domains/{domain_id}/dns/{id}");
-                        let _ = http::delete(&del_url, headers);
-                    }
+                    let del_url =
+                        format!("https://api.domeneshop.no/v0/domains/{domain_id}/dns/{id}");
+                    let _ = http::delete(&del_url, headers);
                 }
             }
         }
@@ -91,14 +101,17 @@ impl Domeneshop {
             .map_err(|e| Error::Json(format!("Domeneshop domains: {e}")))?;
         if let Some(domains) = v.as_array() {
             for d in domains {
-                if let Some(dom) = d.get("domain").and_then(|n| n.as_str()) {
-                    if domain == dom || domain.ends_with(&format!(".{dom}")) {
-                        if let Some(id) = d.get("id").and_then(|i| {
-                            if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                        }) {
-                            return Ok(id);
+                if let Some(dom) = d.get("domain").and_then(|n| n.as_str())
+                    && (domain == dom || domain.ends_with(&format!(".{dom}")))
+                    && let Some(id) = d.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
                         }
-                    }
+                    })
+                {
+                    return Ok(id);
                 }
             }
         }

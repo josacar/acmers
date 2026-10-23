@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use ring::hmac;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -24,13 +24,18 @@ impl DnsProvider for Exoscale {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("EXOSCALE_API_KEY")
+        let api_key = env
+            .get("EXOSCALE_API_KEY")
             .ok_or_else(|| Error::Config("EXOSCALE_API_KEY required".into()))?
             .clone();
-        let api_secret = env.get("EXOSCALE_SECRET_KEY")
+        let api_secret = env
+            .get("EXOSCALE_SECRET_KEY")
             .ok_or_else(|| Error::Config("EXOSCALE_SECRET_KEY required".into()))?
             .clone();
-        Ok(Box::new(Exoscale { api_key, api_secret }))
+        Ok(Box::new(Exoscale {
+            api_key,
+            api_secret,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -48,10 +53,14 @@ impl DnsProvider for Exoscale {
         });
         let body_str = serde_json::to_string(&body).unwrap();
         let path = format!("/dns-domain/{zone_id}/record");
-        let resp = self.request("POST", &path, Some(&body_str))
+        let resp = self
+            .request("POST", &path, Some(&body_str))
             .map_err(|e| Error::Provider(format!("exoscale add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("exoscale add TXT: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "exoscale add TXT: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -80,11 +89,13 @@ impl DnsProvider for Exoscale {
                 let rec_type = rec.get("type").and_then(|t| t.as_str());
                 let rec_name = rec.get("name").and_then(|n| n.as_str());
                 let rec_content = rec.get("content").and_then(|c| c.as_str());
-                if rec_type == Some("TXT") && rec_name == Some(record_name.as_str()) && rec_content == Some(value) {
-                    if let Some(id) = rec.get("id").and_then(|i| i.as_str()) {
-                        let del_path = format!("/dns-domain/{zone_id}/record/{id}");
-                        self.request("DELETE", &del_path, None).ok();
-                    }
+                if rec_type == Some("TXT")
+                    && rec_name == Some(record_name.as_str())
+                    && rec_content == Some(value)
+                    && let Some(id) = rec.get("id").and_then(|i| i.as_str())
+                {
+                    let del_path = format!("/dns-domain/{zone_id}/record/{id}");
+                    self.request("DELETE", &del_path, None).ok();
                 }
             }
         }
@@ -111,7 +122,12 @@ impl Exoscale {
         )
     }
 
-    fn request(&self, method: &str, path: &str, body: Option<&str>) -> Result<http::Response, Error> {
+    fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+    ) -> Result<http::Response, Error> {
         let url = format!("{BASE_URL}{path}");
         let auth = self.sign(method, path, body);
         let headers = [
@@ -128,7 +144,9 @@ impl Exoscale {
             }
             "DELETE" => http::delete(&url, &headers)
                 .map_err(|e| Error::Provider(format!("exoscale DELETE {path}: {e}"))),
-            _ => Err(Error::Provider(format!("exoscale unsupported method: {method}"))),
+            _ => Err(Error::Provider(format!(
+                "exoscale unsupported method: {method}"
+            ))),
         }
     }
 
@@ -151,17 +169,20 @@ impl Exoscale {
             if let Some(domains) = v.get("dns-domains").and_then(|d| d.as_array()) {
                 for d in domains {
                     let dname = d.get("unicode-name").and_then(|n| n.as_str());
-                    if dname == Some(candidate.as_str()) {
-                        if let Some(id) = d.get("id").and_then(|i| i.as_str()) {
-                            let sub = parts[..i].join(".");
-                            let sub = sub.strip_prefix("_acme-challenge.")
-                                .unwrap_or(if sub == "_acme-challenge" { "" } else { &sub });
-                            return Ok((id.to_string(), sub.to_string()));
-                        }
+                    if dname == Some(candidate.as_str())
+                        && let Some(id) = d.get("id").and_then(|i| i.as_str())
+                    {
+                        let sub = parts[..i].join(".");
+                        let sub = sub
+                            .strip_prefix("_acme-challenge.")
+                            .unwrap_or(if sub == "_acme-challenge" { "" } else { &sub });
+                        return Ok((id.to_string(), sub.to_string()));
                     }
                 }
             }
         }
-        Err(Error::Provider(format!("exoscale zone not found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "exoscale zone not found for {fulldomain}"
+        )))
     }
 }

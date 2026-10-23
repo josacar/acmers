@@ -20,7 +20,8 @@ impl DnsProvider for Nederhost {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("NederHost_Key")
+        let key = env
+            .get("NederHost_Key")
             .ok_or_else(|| Error::Config("NederHost_Key required".into()))?
             .clone();
         Ok(Box::new(Nederhost { key }))
@@ -32,11 +33,18 @@ impl DnsProvider for Nederhost {
 
         let body = serde_json::json!([{"content": value, "ttl": 60}]);
         let url = format!("{BASE_URL}/zones/{zone}/records/{name}/TXT");
-        let resp = http::patch(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("nederhost add TXT: {e}")))?;
+        let resp = http::patch(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("nederhost add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("nederhost add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "nederhost add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -72,6 +80,8 @@ impl Nederhost {
                 Err(e) => return Err(Error::Provider(format!("nederhost zone resolution: {e}"))),
             }
         }
-        Err(Error::Provider(format!("nederhost: no zone found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "nederhost: no zone found for {fulldomain}"
+        )))
     }
 }

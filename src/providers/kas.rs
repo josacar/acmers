@@ -24,16 +24,23 @@ impl DnsProvider for Kas {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let login = env.get("KAS_Login")
+        let login = env
+            .get("KAS_Login")
             .ok_or_else(|| Error::Config("KAS_Login required".into()))?
             .clone();
-        let auth_type = env.get("KAS_Authtype")
+        let auth_type = env
+            .get("KAS_Authtype")
             .cloned()
             .unwrap_or_else(|| "plain".to_string());
-        let auth_data = env.get("KAS_Authdata")
+        let auth_data = env
+            .get("KAS_Authdata")
             .ok_or_else(|| Error::Config("KAS_Authdata required".into()))?
             .clone();
-        Ok(Box::new(Kas { login, auth_type, auth_data }))
+        Ok(Box::new(Kas {
+            login,
+            auth_type,
+            auth_data,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -75,7 +82,8 @@ impl DnsProvider for Kas {
             Ok(t) => t,
             Err(_) => return Ok(()),
         };
-        let (zone, record_name) = match self.get_zone_and_record_name(&api_url, &token, &fulldomain) {
+        let (zone, record_name) = match self.get_zone_and_record_name(&api_url, &token, &fulldomain)
+        {
             Ok(r) => r,
             Err(_) => return Ok(()),
         };
@@ -120,9 +128,13 @@ impl Kas {
 
         Self::rate_limit();
 
-        let resp = http::post(auth_url, xml.as_bytes(), "text/xml", &[
-            ("SOAPAction", "urn:xmethodsKasApiAuthentication#KasAuth"),
-        ]).map_err(|e| Error::Provider(format!("KAS auth request: {e}")))?;
+        let resp = http::post(
+            auth_url,
+            xml.as_bytes(),
+            "text/xml",
+            &[("SOAPAction", "urn:xmethodsKasApiAuthentication#KasAuth")],
+        )
+        .map_err(|e| Error::Provider(format!("KAS auth request: {e}")))?;
 
         if resp.body.is_empty() {
             return Err(Error::Provider("KAS: auth response was empty".into()));
@@ -137,7 +149,13 @@ impl Kas {
             .ok_or_else(|| Error::Provider("KAS: could not extract credential token".into()))
     }
 
-    fn call_api(&self, api_url: &str, token: &str, action: &str, request_params: &str) -> Result<String, Error> {
+    fn call_api(
+        &self,
+        api_url: &str,
+        token: &str,
+        action: &str,
+        request_params: &str,
+    ) -> Result<String, Error> {
         let params = if request_params.is_empty() {
             format!(
                 r#"{{"kas_login":"{}","kas_auth_type":"session","kas_auth_data":"{}","kas_action":"{}"}}"#,
@@ -167,9 +185,13 @@ impl Kas {
 
         Self::rate_limit();
 
-        let resp = http::post(api_url, xml.as_bytes(), "text/xml", &[
-            ("SOAPAction", "urn:xmethodsKasApi#KasApi"),
-        ]).map_err(|e| Error::Provider(format!("KAS API request ({action}): {e}")))?;
+        let resp = http::post(
+            api_url,
+            xml.as_bytes(),
+            "text/xml",
+            &[("SOAPAction", "urn:xmethodsKasApi#KasApi")],
+        )
+        .map_err(|e| Error::Provider(format!("KAS API request ({action}): {e}")))?;
 
         if resp.body.is_empty() {
             return Err(Error::Provider(format!("KAS: {action} response was empty")));
@@ -189,7 +211,12 @@ impl Kas {
         Ok(())
     }
 
-    fn get_zone_and_record_name(&self, api_url: &str, token: &str, fulldomain: &str) -> Result<(String, String), Error> {
+    fn get_zone_and_record_name(
+        &self,
+        api_url: &str,
+        token: &str,
+        fulldomain: &str,
+    ) -> Result<(String, String), Error> {
         let response = self.call_api(api_url, token, "get_domains", "")?;
 
         if response.contains("<SOAP-ENV:Fault>") {
@@ -217,19 +244,35 @@ impl Kas {
         Ok((zone, record_name))
     }
 
-    fn get_record_ids(&self, api_url: &str, token: &str, zone: &str, record_name: &str, value: &str) -> Result<Vec<String>, Error> {
+    fn get_record_ids(
+        &self,
+        api_url: &str,
+        token: &str,
+        zone: &str,
+        record_name: &str,
+        value: &str,
+    ) -> Result<Vec<String>, Error> {
         let request_params = format!(r#""zone_host":"{}""#, zone);
         let response = self.call_api(api_url, token, "get_dns_settings", &request_params)?;
 
         if response.contains("<SOAP-ENV:Fault>") {
             let fault = extract_fault_string(&response);
-            return Err(Error::Provider(format!("KAS get_dns_settings error: {fault}")));
+            return Err(Error::Provider(format!(
+                "KAS get_dns_settings error: {fault}"
+            )));
         }
 
         Ok(extract_record_ids(&response, record_name, value))
     }
 
-    fn add_record(&self, api_url: &str, token: &str, zone: &str, record_name: &str, value: &str) -> ProviderResult {
+    fn add_record(
+        &self,
+        api_url: &str,
+        token: &str,
+        zone: &str,
+        record_name: &str,
+        value: &str,
+    ) -> ProviderResult {
         let request_params = format!(
             r#""record_name":"{}","record_type":"TXT","record_data":"{}","record_aux":"0","zone_host":"{}""#,
             record_name, value, zone
@@ -242,7 +285,9 @@ impl Kas {
             if fault == "record_already_exists" {
                 return Ok(());
             }
-            return Err(Error::Provider(format!("KAS add_dns_settings error: {fault}")));
+            return Err(Error::Provider(format!(
+                "KAS add_dns_settings error: {fault}"
+            )));
         }
 
         Self::check_success(&response, "add_dns_settings")
@@ -257,7 +302,9 @@ impl Kas {
             if fault == "record_id_not_found" {
                 return Ok(());
             }
-            return Err(Error::Provider(format!("KAS delete_dns_settings error: {fault}")));
+            return Err(Error::Provider(format!(
+                "KAS delete_dns_settings error: {fault}"
+            )));
         }
 
         Self::check_success(&response, "delete_dns_settings")
@@ -270,8 +317,11 @@ fn discover_wsdl_endpoint(service: &str) -> Result<String, Error> {
     let resp = http::get(&wsdl_url, &[])
         .map_err(|e| Error::Provider(format!("KAS WSDL discovery ({service}): {e}")))?;
 
-    extract_soap_address(&resp.body)
-        .ok_or_else(|| Error::Provider(format!("KAS: could not find SOAP address in {service} WSDL")))
+    extract_soap_address(&resp.body).ok_or_else(|| {
+        Error::Provider(format!(
+            "KAS: could not find SOAP address in {service} WSDL"
+        ))
+    })
 }
 
 fn extract_soap_address(wsdl: &str) -> Option<String> {
@@ -296,7 +346,7 @@ fn extract_soap_address(wsdl: &str) -> Option<String> {
 fn extract_fault_string(xml: &str) -> String {
     let open = "<faultstring>";
     let close = "</faultstring>";
-    let cleaned = xml.replace('\n', "").replace('\r', "");
+    let cleaned = xml.replace(['\n', '\r'], "");
     if let Some(start) = cleaned.find(open) {
         let content_start = start + open.len();
         if let Some(end) = cleaned[content_start..].find(close) {
@@ -307,7 +357,7 @@ fn extract_fault_string(xml: &str) -> String {
 }
 
 fn extract_token(xml: &str) -> Option<String> {
-    let cleaned = xml.replace('\n', " ").replace('\r', " ");
+    let cleaned = xml.replace(['\n', '\r'], " ");
     let marker = r#"return xsi:type="xsd:string">"#;
     let idx = cleaned.find(marker)?;
     let content_start = idx + marker.len();
@@ -317,7 +367,7 @@ fn extract_token(xml: &str) -> Option<String> {
 
 fn extract_domain_names(xml: &str) -> Vec<String> {
     let mut domains = Vec::new();
-    let cleaned = xml.replace('\n', "").replace('\r', "");
+    let cleaned = xml.replace(['\n', '\r'], "");
     let marker = r#"<key xsi:type="xsd:string">domain_name</key><value xsi:type="xsd:string">"#;
     let mut pos = 0;
     while let Some(start) = cleaned[pos..].find(marker) {
@@ -334,7 +384,7 @@ fn extract_domain_names(xml: &str) -> Vec<String> {
 
 fn extract_record_ids(xml: &str, record_name: &str, value: &str) -> Vec<String> {
     let mut ids = Vec::new();
-    let cleaned = xml.replace('\n', "").replace('\r', "");
+    let cleaned = xml.replace(['\n', '\r'], "");
     let item_marker = r#"<item xsi:type="ns2:Map">"#;
     let mut pos = 0;
     while let Some(start) = cleaned[pos..].find(item_marker) {
@@ -353,7 +403,8 @@ fn extract_record_ids(xml: &str, record_name: &str, value: &str) -> Vec<String> 
         let value_match = item.contains(value);
 
         if name_match && type_match && value_match {
-            let id_marker = r#"<item><key xsi:type="xsd:string">record_id</key><value xsi:type="xsd:string">"#;
+            let id_marker =
+                r#"<item><key xsi:type="xsd:string">record_id</key><value xsi:type="xsd:string">"#;
             if let Some(id_start) = item.find(id_marker) {
                 let id_content_start = id_start + id_marker.len();
                 if let Some(id_end) = item[id_content_start..].find("</value>") {

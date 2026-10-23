@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for Digitalocean {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("DO_API_KEY")
+        let token = env
+            .get("DO_API_KEY")
             .ok_or_else(|| Error::Config("DO_API_KEY required".into()))?
             .clone();
         Ok(Box::new(Digitalocean { token }))
@@ -33,16 +34,17 @@ impl DnsProvider for Digitalocean {
             "name": name,
             "data": value,
             "ttl": 120,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("https://api.digitalocean.com/v2/domains/{zone_name}/records");
         let resp = http::post(&url, &body, "application/json", &[("Authorization", &auth)])
             .map_err(|e| Error::Provider(format!("DO add TXT: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("DO response: {e}")))?;
-        if let Some(msg) = v.get("message").and_then(|m| m.as_str()) {
-            if resp.status >= 400 {
-                return Err(Error::Provider(format!("DO add TXT: {msg}")));
-            }
+        if let Some(msg) = v.get("message").and_then(|m| m.as_str())
+            && resp.status >= 400
+        {
+            return Err(Error::Provider(format!("DO add TXT: {msg}")));
         }
         Ok(())
     }
@@ -53,7 +55,8 @@ impl DnsProvider for Digitalocean {
             Ok(z) => z,
             Err(_) => return Ok(()),
         };
-        let mut list_url = format!("https://api.digitalocean.com/v2/domains/{zone_name}/records?type=TXT");
+        let mut list_url =
+            format!("https://api.digitalocean.com/v2/domains/{zone_name}/records?type=TXT");
         loop {
             let resp = match http::get(&list_url, &[("Authorization", &auth)]) {
                 Ok(r) => r,
@@ -68,11 +71,12 @@ impl DnsProvider for Digitalocean {
                     if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                         && record.get("name").and_then(|n| n.as_str()) == Some(name)
                         && record.get("data").and_then(|d| d.as_str()) == Some(value)
+                        && let Some(id) = record.get("id").and_then(|i| i.as_i64())
                     {
-                        if let Some(id) = record.get("id").and_then(|i| i.as_i64()) {
-                            let del_url = format!("https://api.digitalocean.com/v2/domains/{zone_name}/records/{id}");
-                            let _ = http::delete(&del_url, &[("Authorization", &auth)]);
-                        }
+                        let del_url = format!(
+                            "https://api.digitalocean.com/v2/domains/{zone_name}/records/{id}"
+                        );
+                        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
                     }
                 }
             }
@@ -95,10 +99,10 @@ impl Digitalocean {
                 .map_err(|e| Error::Json(format!("DO domains: {e}")))?;
             if let Some(domains) = v.get("domains").and_then(|d| d.as_array()) {
                 for d in domains {
-                    if let Some(name) = d.get("name").and_then(|n| n.as_str()) {
-                        if domain == name || domain.ends_with(&format!(".{name}")) {
-                            return Ok(name.to_string());
-                        }
+                    if let Some(name) = d.get("name").and_then(|n| n.as_str())
+                        && (domain == name || domain.ends_with(&format!(".{name}")))
+                    {
+                        return Ok(name.to_string());
                     }
                 }
             }

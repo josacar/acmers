@@ -27,33 +27,50 @@ impl DnsProvider for MythicBeasts {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("MB_AK")
+        let api_key = env
+            .get("MB_AK")
             .ok_or_else(|| Error::Config("MB_AK required".into()))?
             .clone();
-        let api_secret = env.get("MB_AS")
+        let api_secret = env
+            .get("MB_AS")
             .ok_or_else(|| Error::Config("MB_AS required".into()))?
             .clone();
-        Ok(Box::new(MythicBeasts { api_key, api_secret }))
+        Ok(Box::new(MythicBeasts {
+            api_key,
+            api_secret,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
         let token = self.oauth2_token()?;
         let bearer = format!("Bearer {token}");
-        let headers: &[(&str, &str)] = &[
-            ("Authorization", &bearer),
-            ("Accepts", "application/json"),
-        ];
+        let headers: &[(&str, &str)] =
+            &[("Authorization", &bearer), ("Accepts", "application/json")];
         let (zone, sub_domain) = self.resolve_zone(name, headers)?;
 
         let url = format!("{MB_API}/{zone}/records/{sub_domain}/TXT");
         let body = format!("data={value}");
-        let resp = http::post(&url, body.as_bytes(), "application/x-www-form-urlencoded", headers)
-            .map_err(|e| Error::Provider(format!("MythicBeasts add TXT: {e}")))?;
-        if resp.status >= 400 || resp.body.contains("\"error\"") || resp.body.contains("invalid_client") {
-            return Err(Error::Provider(format!("MythicBeasts add TXT: HTTP {} {}", resp.status, resp.body)));
+        let resp = http::post(
+            &url,
+            body.as_bytes(),
+            "application/x-www-form-urlencoded",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("MythicBeasts add TXT: {e}")))?;
+        if resp.status >= 400
+            || resp.body.contains("\"error\"")
+            || resp.body.contains("invalid_client")
+        {
+            return Err(Error::Provider(format!(
+                "MythicBeasts add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         if !resp.body.contains("1 records added") {
-            return Err(Error::Provider(format!("MythicBeasts add TXT: unexpected response: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "MythicBeasts add TXT: unexpected response: {}",
+                resp.body
+            )));
         }
 
         for _ in 0..6 {
@@ -66,7 +83,9 @@ impl DnsProvider for MythicBeasts {
             }
             thread::sleep(Duration::from_secs(20));
         }
-        Err(Error::Provider("MythicBeasts: record not verified after retries".into()))
+        Err(Error::Provider(
+            "MythicBeasts: record not verified after retries".into(),
+        ))
     }
 
     fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -75,17 +94,20 @@ impl DnsProvider for MythicBeasts {
             Err(_) => return Ok(()),
         };
         let bearer = format!("Bearer {token}");
-        let headers: &[(&str, &str)] = &[
-            ("Authorization", &bearer),
-            ("Accepts", "application/json"),
-        ];
+        let headers: &[(&str, &str)] =
+            &[("Authorization", &bearer), ("Accepts", "application/json")];
         let (zone, sub_domain) = match self.resolve_zone(name, headers) {
             Ok(z) => z,
             Err(_) => return Ok(()),
         };
         let url = format!("{MB_API}/{zone}/records/{sub_domain}/TXT");
         let body = format!("data={value}");
-        let _ = http::delete_with_body(&url, body.as_bytes(), "application/x-www-form-urlencoded", headers);
+        let _ = http::delete_with_body(
+            &url,
+            body.as_bytes(),
+            "application/x-www-form-urlencoded",
+            headers,
+        );
         Ok(())
     }
 }
@@ -94,27 +116,42 @@ impl MythicBeasts {
     fn oauth2_token(&self) -> Result<String, Error> {
         let creds = format!("{}:{}", self.api_key, self.api_secret);
         let basic = format!("Basic {}", base64::encode_std(creds.as_bytes()));
-        let headers: &[(&str, &str)] = &[
-            ("Authorization", &basic),
-            ("Accepts", "application/json"),
-        ];
+        let headers: &[(&str, &str)] =
+            &[("Authorization", &basic), ("Accepts", "application/json")];
         let body = b"grant_type=client_credentials";
         let resp = http::post(MB_AUTH, body, "application/x-www-form-urlencoded", headers)
             .map_err(|e| Error::Provider(format!("MythicBeasts OAuth2: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("MythicBeasts OAuth2: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "MythicBeasts OAuth2: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("MythicBeasts OAuth2: {e}")))?;
         if v.get("token_type").and_then(|t| t.as_str()) != Some("bearer") {
-            return Err(Error::Provider(format!("MythicBeasts OAuth2: token_type not bearer: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "MythicBeasts OAuth2: token_type not bearer: {}",
+                resp.body
+            )));
         }
-        let token = v.get("access_token").and_then(|t| t.as_str())
-            .ok_or_else(|| Error::Provider(format!("MythicBeasts OAuth2: no access_token: {}", resp.body)))?;
+        let token = v
+            .get("access_token")
+            .and_then(|t| t.as_str())
+            .ok_or_else(|| {
+                Error::Provider(format!(
+                    "MythicBeasts OAuth2: no access_token: {}",
+                    resp.body
+                ))
+            })?;
         Ok(token.to_string())
     }
 
-    fn resolve_zone(&self, fulldomain: &str, headers: &[(&str, &str)]) -> Result<(String, String), Error> {
+    fn resolve_zone(
+        &self,
+        fulldomain: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<(String, String), Error> {
         let parts: Vec<&str> = fulldomain.split('.').collect();
         let mut p = 0usize;
         for i in 0..parts.len() {
@@ -130,7 +167,9 @@ impl MythicBeasts {
                     return Ok((h, sub_domain));
                 }
                 Ok(resp) if resp.body.contains("\"error\"") && resp.status == 403 => {
-                    return Err(Error::Provider(format!("MythicBeasts access denied for {h}")));
+                    return Err(Error::Provider(format!(
+                        "MythicBeasts access denied for {h}"
+                    )));
                 }
                 _ => {}
             }

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -21,17 +21,23 @@ impl DnsProvider for Opnsense {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let host = env.get("OPNSENSE_HOST")
+        let host = env
+            .get("OPNSENSE_HOST")
             .ok_or_else(|| Error::Config("OPNSENSE_HOST required".into()))?
             .clone();
-        let api_key = env.get("OPNSENSE_API_KEY")
+        let api_key = env
+            .get("OPNSENSE_API_KEY")
             .ok_or_else(|| Error::Config("OPNSENSE_API_KEY required".into()))?
             .clone();
-        let api_secret = env.get("OPNSENSE_API_SECRET")
+        let api_secret = env
+            .get("OPNSENSE_API_SECRET")
             .ok_or_else(|| Error::Config("OPNSENSE_API_SECRET required".into()))?
             .clone();
 
-        let port = env.get("OPNSENSE_PORT").map(|s| s.as_str()).unwrap_or("443");
+        let port = env
+            .get("OPNSENSE_PORT")
+            .map(|s| s.as_str())
+            .unwrap_or("443");
         let base = build_base_url(&host, port);
         let creds = base64::encode_std(format!("{api_key}:{api_secret}").as_bytes());
         let auth_header = format!("Basic {creds}");
@@ -64,10 +70,14 @@ impl DnsProvider for Opnsense {
             &serde_json::to_vec(&body).unwrap(),
             "application/json",
             &[("Authorization", &self.auth_header)],
-        ).map_err(|e| Error::Provider(format!("opnsense add record: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("opnsense add record: {e}")))?;
 
         if !resp.body.contains("\"result\":\"saved\"") {
-            return Err(Error::Provider(format!("opnsense add record failed: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "opnsense add record failed: {}",
+                resp.body
+            )));
         }
 
         let _ = http::post(
@@ -98,7 +108,8 @@ impl DnsProvider for Opnsense {
             b"{}",
             "application/json",
             &[("Authorization", &self.auth_header)],
-        ).map_err(|e| Error::Provider(format!("opnsense delete record: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("opnsense delete record: {e}")))?;
 
         if resp.body.contains("\"result\":\"deleted\"") {
             let _ = http::post(
@@ -126,7 +137,9 @@ impl Opnsense {
         let v: Value = serde_json::from_str(&body)
             .map_err(|e| Error::Json(format!("opnsense searchPrimaryDomain: {e}")))?;
 
-        let rows = v.get("rows").and_then(|r| r.as_array())
+        let rows = v
+            .get("rows")
+            .and_then(|r| r.as_array())
             .ok_or_else(|| Error::Provider("opnsense: no rows in domain search response".into()))?;
 
         let parts: Vec<&str> = fulldomain.split('.').collect();
@@ -137,7 +150,9 @@ impl Opnsense {
                 let r#type = row.get("type").and_then(|t| t.as_str()).unwrap_or("");
                 let domainname = row.get("domainname").and_then(|d| d.as_str()).unwrap_or("");
                 if enabled == "1" && r#type == "primary" && domainname == candidate {
-                    let uuid = row.get("uuid").and_then(|u| u.as_str())
+                    let uuid = row
+                        .get("uuid")
+                        .and_then(|u| u.as_str())
                         .ok_or_else(|| Error::Provider("opnsense: no uuid in domain row".into()))?
                         .to_string();
                     let host = parts[..i].join(".");
@@ -146,10 +161,17 @@ impl Opnsense {
             }
         }
 
-        Err(Error::Provider(format!("opnsense: zone not found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "opnsense: zone not found for {fulldomain}"
+        )))
     }
 
-    fn find_existing_record(&self, domain: &str, name: &str, value: &str) -> Result<Option<String>, Error> {
+    fn find_existing_record(
+        &self,
+        domain: &str,
+        name: &str,
+        value: &str,
+    ) -> Result<Option<String>, Error> {
         let body = self.api_get("/record/searchRecord")?;
         let v: Value = serde_json::from_str(&body)
             .map_err(|e| Error::Json(format!("opnsense searchRecord: {e}")))?;
@@ -166,10 +188,9 @@ impl Opnsense {
                     && row_name == name
                     && row_type == "TXT"
                     && row_value == value
+                    && let Some(uuid) = row.get("uuid").and_then(|u| u.as_str())
                 {
-                    if let Some(uuid) = row.get("uuid").and_then(|u| u.as_str()) {
-                        return Ok(Some(uuid.to_string()));
-                    }
+                    return Ok(Some(uuid.to_string()));
                 }
             }
         }

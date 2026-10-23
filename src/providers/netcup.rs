@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -20,20 +20,31 @@ impl DnsProvider for Netcup {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["NETCUP_CUSTOMER_NUMBER", "NETCUP_API_KEY", "NETCUP_API_PASSWORD"]
+        &[
+            "NETCUP_CUSTOMER_NUMBER",
+            "NETCUP_API_KEY",
+            "NETCUP_API_PASSWORD",
+        ]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let customer_number = env.get("NETCUP_CUSTOMER_NUMBER")
+        let customer_number = env
+            .get("NETCUP_CUSTOMER_NUMBER")
             .ok_or_else(|| Error::Config("NETCUP_CUSTOMER_NUMBER required".into()))?
             .clone();
-        let api_key = env.get("NETCUP_API_KEY")
+        let api_key = env
+            .get("NETCUP_API_KEY")
             .ok_or_else(|| Error::Config("NETCUP_API_KEY required".into()))?
             .clone();
-        let api_password = env.get("NETCUP_API_PASSWORD")
+        let api_password = env
+            .get("NETCUP_API_PASSWORD")
             .ok_or_else(|| Error::Config("NETCUP_API_PASSWORD required".into()))?
             .clone();
-        Ok(Box::new(Netcup { customer_number, api_key, api_password }))
+        Ok(Box::new(Netcup {
+            customer_number,
+            api_key,
+            api_password,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -62,12 +73,16 @@ impl DnsProvider for Netcup {
         };
         let records = match self.get_dns_records(&session, domain) {
             Ok(r) => r,
-            Err(_) => { let _ = self.logout(&session); return Ok(()); }
+            Err(_) => {
+                let _ = self.logout(&session);
+                return Ok(());
+            }
         };
 
         let record_name = name.strip_suffix(&format!(".{domain}")).unwrap_or(name);
 
-        let matching: Vec<&Value> = records.iter()
+        let matching: Vec<&Value> = records
+            .iter()
             .filter(|r| {
                 r.get("hostname").and_then(|h| h.as_str()) == Some(record_name)
                     && r.get("type").and_then(|t| t.as_str()) == Some("TXT")
@@ -103,8 +118,13 @@ impl Netcup {
                 "apipassword": self.api_password,
             }
         });
-        let resp = http::post(BASE_URL, &serde_json::to_vec(&body).unwrap(), "application/json", &[])
-            .map_err(|e| Error::Provider(format!("netcup login: {e}")))?;
+        let resp = http::post(
+            BASE_URL,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[],
+        )
+        .map_err(|e| Error::Provider(format!("netcup login: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("netcup login response: {e}")))?;
 
@@ -115,7 +135,8 @@ impl Netcup {
             return Err(Error::Provider(format!("netcup login failed: {msg}")));
         }
 
-        let session_id = json::get_string_required(&v, &["responsedata", "apisessionid"])?.to_string();
+        let session_id =
+            json::get_string_required(&v, &["responsedata", "apisessionid"])?.to_string();
         Ok(session_id)
     }
 
@@ -128,7 +149,12 @@ impl Netcup {
                 "apisessionid": session,
             }
         });
-        let _ = http::post(BASE_URL, &serde_json::to_vec(&body).unwrap(), "application/json", &[]);
+        let _ = http::post(
+            BASE_URL,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[],
+        );
         Ok(())
     }
 
@@ -142,8 +168,13 @@ impl Netcup {
                 "apisessionid": session,
             }
         });
-        let resp = http::post(BASE_URL, &serde_json::to_vec(&body).unwrap(), "application/json", &[])
-            .map_err(|e| Error::Provider(format!("netcup infoDnsZone: {e}")))?;
+        let resp = http::post(
+            BASE_URL,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[],
+        )
+        .map_err(|e| Error::Provider(format!("netcup infoDnsZone: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("netcup infoDnsZone response: {e}")))?;
 
@@ -171,10 +202,18 @@ impl Netcup {
                 }
             }
         });
-        let resp = http::post(BASE_URL, &serde_json::to_vec(&body).unwrap(), "application/json", &[])
-            .map_err(|e| Error::Provider(format!("netcup updateDnsZone: {e}")))?;
+        let resp = http::post(
+            BASE_URL,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[],
+        )
+        .map_err(|e| Error::Provider(format!("netcup updateDnsZone: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("netcup updateDnsZone: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "netcup updateDnsZone: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
 
         let v: Value = serde_json::from_str(&resp.body)
@@ -183,7 +222,9 @@ impl Netcup {
             let msg = json::get_string(&v, &["shortmessage"])
                 .or_else(|| json::get_string(&v, &["longmessage"]))
                 .unwrap_or("unknown error");
-            return Err(Error::Provider(format!("netcup updateDnsZone failed: {msg}")));
+            return Err(Error::Provider(format!(
+                "netcup updateDnsZone failed: {msg}"
+            )));
         }
         Ok(())
     }

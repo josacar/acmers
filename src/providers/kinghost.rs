@@ -21,10 +21,12 @@ impl DnsProvider for Kinghost {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("KINGHOST_Username")
+        let username = env
+            .get("KINGHOST_Username")
             .ok_or_else(|| Error::Config("KINGHOST_Username required".into()))?
             .clone();
-        let password = env.get("KINGHOST_Password")
+        let password = env
+            .get("KINGHOST_Password")
             .ok_or_else(|| Error::Config("KINGHOST_Password required".into()))?
             .clone();
         Ok(Box::new(Kinghost { username, password }))
@@ -42,11 +44,19 @@ impl DnsProvider for Kinghost {
         let resp = http::get(&check_url, headers)
             .map_err(|e| Error::Provider(format!("kinghost check TXT: {e}")))?;
         if !resp.body.contains("\"status\":\"ok\"") {
-            return Err(Error::Provider(format!("kinghost check TXT: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "kinghost check TXT: {}",
+                resp.body
+            )));
         }
 
-        let resp = http::post(&url, form.as_bytes(), "application/x-www-form-urlencoded", headers)
-            .map_err(|e| Error::Provider(format!("kinghost add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("kinghost add TXT: {e}")))?;
         if !resp.body.contains("\"status\":\"ok\"") {
             return Err(Error::Provider(format!("kinghost add TXT: {}", resp.body)));
         }
@@ -61,10 +71,18 @@ impl DnsProvider for Kinghost {
             ("X-Auth-Key", &self.password),
         ];
 
-        let resp = http::delete_with_body(&url, form.as_bytes(), "application/x-www-form-urlencoded", headers)
-            .map_err(|e| Error::Provider(format!("kinghost remove TXT: {e}")))?;
+        let resp = http::delete_with_body(
+            &url,
+            form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("kinghost remove TXT: {e}")))?;
         if !resp.body.contains("\"status\":\"ok\"") {
-            return Err(Error::Provider(format!("kinghost remove TXT: {}", resp.body)));
+            return Err(Error::Provider(format!(
+                "kinghost remove TXT: {}",
+                resp.body
+            )));
         }
         Ok(())
     }

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -21,7 +21,8 @@ impl DnsProvider for Alviy {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("Alviy_token")
+        let token = env
+            .get("Alviy_token")
             .ok_or_else(|| Error::Config("Alviy_token required".into()))?
             .clone();
         let auth = format!("Bearer {token}");
@@ -34,11 +35,18 @@ impl DnsProvider for Alviy {
             "content": value,
             "type": "TXT",
         });
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &self.auth)])
-            .map_err(|e| Error::Provider(format!("alviy add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &self.auth)],
+        )
+        .map_err(|e| Error::Provider(format!("alviy add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("alviy add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "alviy add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -59,21 +67,25 @@ impl DnsProvider for Alviy {
         };
         let del_url = format!("{BASE_URL}/zone/{domain}/record/{uuid}");
         let body = serde_json::json!({"confirm": 1});
-        let _ = http::delete_with_body(&del_url, &serde_json::to_vec(&body).unwrap(),
-            "application/json", &[("Authorization", &self.auth)]);
+        let _ = http::delete_with_body(
+            &del_url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &self.auth)],
+        );
         Ok(())
     }
 }
 
 fn find_uuid_by_value(body: &str, value: &str) -> Option<String> {
     let v: Value = serde_json::from_str(body).ok()?;
-    let arr = v.as_array().or_else(|| v.get("data").and_then(|d| d.as_array()))?;
+    let arr = v
+        .as_array()
+        .or_else(|| v.get("data").and_then(|d| d.as_array()))?;
     for record in arr {
         let has_value = record.get("content").and_then(|c| c.as_str()) == Some(value);
-        if has_value {
-            if let Some(uuid) = record.get("uuid").and_then(|u| u.as_str()) {
-                return Some(uuid.to_string());
-            }
+        if has_value && let Some(uuid) = record.get("uuid").and_then(|u| u.as_str()) {
+            return Some(uuid.to_string());
         }
     }
     None

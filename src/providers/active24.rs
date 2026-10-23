@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use serde_json::Value;
 use ring::hmac;
+use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -23,13 +23,20 @@ impl Active24 {
         let now = time::OffsetDateTime::now_utc();
         let datez = format!(
             "{:04}{:02}{:02}T{:02}{:02}{:02}Z",
-            now.year(), now.month() as u8, now.day(),
-            now.hour(), now.minute(), now.second()
+            now.year(),
+            now.month() as u8,
+            now.day(),
+            now.hour(),
+            now.minute(),
+            now.second()
         );
 
         let canonical = format!("{method} {endpoint} {timestamp}");
 
-        let key = hmac::Key::new(hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY, self.api_secret.as_bytes());
+        let key = hmac::Key::new(
+            hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
+            self.api_secret.as_bytes(),
+        );
         let tag = hmac::sign(&key, canonical.as_bytes());
         let signature = crate::base64::hex(tag.as_ref());
 
@@ -45,7 +52,10 @@ impl Active24 {
     }
 
     fn header_refs(headers: &[(String, String)]) -> Vec<(&str, &str)> {
-        headers.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect()
+        headers
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect()
     }
 
     fn rest_get(&self, endpoint: &str) -> Result<http::Response, Error> {
@@ -76,7 +86,8 @@ impl Active24 {
         let resp = self.rest_get("/v1/user/self/service")?;
         if resp.status >= 400 {
             return Err(Error::Provider(format!(
-                "Active24 service list: HTTP {} {}", resp.status, resp.body
+                "Active24 service list: HTTP {} {}",
+                resp.status, resp.body
             )));
         }
 
@@ -84,7 +95,9 @@ impl Active24 {
         for i in 0..parts.len() {
             let h = parts[i..].join(".");
             if h.is_empty() {
-                return Err(Error::Provider(format!("Active24: cannot find zone for {fulldomain}")));
+                return Err(Error::Provider(format!(
+                    "Active24: cannot find zone for {fulldomain}"
+                )));
             }
             if resp.body.contains(&format!("\"{h}\"")) {
                 let sub_domain = if i == 0 {
@@ -96,7 +109,9 @@ impl Active24 {
                 return Ok((sub_domain, service_id));
             }
         }
-        Err(Error::Provider(format!("Active24: cannot find zone for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "Active24: cannot find zone for {fulldomain}"
+        )))
     }
 
     fn get_service_id(&self, zone: &str) -> Result<String, Error> {
@@ -104,19 +119,22 @@ impl Active24 {
         let resp = self.rest_get(&endpoint)?;
         if resp.status >= 400 {
             return Err(Error::Provider(format!(
-                "Active24 zone lookup: HTTP {} {}", resp.status, resp.body
+                "Active24 zone lookup: HTTP {} {}",
+                resp.status, resp.body
             )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Provider(format!("Active24 zone response: {e}")))?;
-        let id = v.get("id")
+        let id = v
+            .get("id")
             .and_then(|id| {
-                id.as_i64().map(|n| n.to_string())
+                id.as_i64()
+                    .map(|n| n.to_string())
                     .or_else(|| id.as_str().map(|s| s.to_string()))
             })
-            .ok_or_else(|| Error::Provider(format!(
-                "Active24: no id in zone response: {}", resp.body
-            )))?;
+            .ok_or_else(|| {
+                Error::Provider(format!("Active24: no id in zone response: {}", resp.body))
+            })?;
         Ok(id)
     }
 }
@@ -131,13 +149,18 @@ impl DnsProvider for Active24 {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("Active24_ApiKey")
+        let api_key = env
+            .get("Active24_ApiKey")
             .ok_or_else(|| Error::Config("Active24_ApiKey required".into()))?
             .clone();
-        let api_secret = env.get("Active24_ApiSecret")
+        let api_secret = env
+            .get("Active24_ApiSecret")
             .ok_or_else(|| Error::Config("Active24_ApiSecret required".into()))?
             .clone();
-        Ok(Box::new(Active24 { api_key, api_secret }))
+        Ok(Box::new(Active24 {
+            api_key,
+            api_secret,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -148,11 +171,13 @@ impl DnsProvider for Active24 {
             "name": sub_domain,
             "content": value,
             "ttl": 300,
-        })).unwrap();
+        }))
+        .unwrap();
         let resp = self.rest_post(&endpoint, &body)?;
         if resp.status >= 400 || resp.body.contains("error") {
             return Err(Error::Provider(format!(
-                "Active24 add TXT: HTTP {} {}", resp.status, resp.body
+                "Active24 add TXT: HTTP {} {}",
+                resp.status, resp.body
             )));
         }
         Ok(())
@@ -174,24 +199,36 @@ impl DnsProvider for Active24 {
             Err(_) => return Ok(()),
         };
 
-        let records: Vec<&Value> = v.as_array()
+        let records: Vec<&Value> = v
+            .as_array()
             .map(|a| a.iter().collect())
-            .or_else(|| v.get("records").and_then(|r| r.as_array()).map(|a| a.iter().collect()))
-            .or_else(|| v.get("data").and_then(|r| r.as_array()).map(|a| a.iter().collect()))
+            .or_else(|| {
+                v.get("records")
+                    .and_then(|r| r.as_array())
+                    .map(|a| a.iter().collect())
+            })
+            .or_else(|| {
+                v.get("data")
+                    .and_then(|r| r.as_array())
+                    .map(|a| a.iter().collect())
+            })
             .unwrap_or_default();
 
         for record in records {
             let rtype = record.get("type").and_then(|t| t.as_str()).unwrap_or("");
             let rname = record.get("name").and_then(|n| n.as_str()).unwrap_or("");
             let rcontent = record.get("content").and_then(|c| c.as_str()).unwrap_or("");
-            if rtype == "TXT" && rname == sub_domain && rcontent == value {
-                if let Some(id) = record.get("id").and_then(|i| {
-                    i.as_i64().map(|n| n.to_string())
+            if rtype == "TXT"
+                && rname == sub_domain
+                && rcontent == value
+                && let Some(id) = record.get("id").and_then(|i| {
+                    i.as_i64()
+                        .map(|n| n.to_string())
                         .or_else(|| i.as_str().map(|s| s.to_string()))
-                }) {
-                    let del_endpoint = format!("/v2/service/{service_id}/dns/record/{id}");
-                    let _ = self.rest_delete(&del_endpoint);
-                }
+                })
+            {
+                let del_endpoint = format!("/v2/service/{service_id}/dns/record/{id}");
+                let _ = self.rest_delete(&del_endpoint);
             }
         }
         Ok(())

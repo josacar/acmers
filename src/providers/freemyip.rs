@@ -18,18 +18,25 @@ impl DnsProvider for Freemyip {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("FREEMYIP_Token")
+        let token = env
+            .get("FREEMYIP_Token")
             .ok_or_else(|| Error::Config("FREEMYIP_Token required".into()))?
             .clone();
         Ok(Box::new(Freemyip { token }))
     }
 
     fn add_txt(&self, domain: &str, _name: &str, value: &str) -> ProviderResult {
-        let url = format!("https://freemyip.com/update?token={}&domain={domain}&txt={value}", self.token);
-        let resp = http::get(&url, &[])
-            .map_err(|e| Error::Provider(format!("freemyip update: {e}")))?;
+        let url = format!(
+            "https://freemyip.com/update?token={}&domain={domain}&txt={value}",
+            self.token
+        );
+        let resp =
+            http::get(&url, &[]).map_err(|e| Error::Provider(format!("freemyip update: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("freemyip update: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "freemyip update: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }

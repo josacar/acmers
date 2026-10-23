@@ -8,7 +8,9 @@ Each DNS provider in `acmers` implements the `DnsProvider` trait with two method
 All credentials are passed via environment variables, following acme.sh naming conventions.
 Required vars differ per provider. Run `acmers list-providers` to see requirements.
 
-## Implemented Providers (68)
+## Implemented Providers (195)
+
+Detailed reference entries are provided below for selected providers. Run `acmers list-providers` to see the full registry of 195 implemented providers plus 6 stubs.
 
 ### Amazon Route53 (`aws`)
 - **Env:** `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`

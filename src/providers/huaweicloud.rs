@@ -4,6 +4,7 @@ use serde_json::Value;
 
 use crate::error::Error;
 use crate::http;
+use crate::providers::helpers;
 use crate::providers::{DnsProvider, ProviderResult};
 
 const IAM_API: &str = "https://iam.myhuaweicloud.com";
@@ -21,17 +22,31 @@ impl DnsProvider for Huaweicloud {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["HUAWEICLOUD_Username", "HUAWEICLOUD_Password", "HUAWEICLOUD_DomainName"]
+        &[
+            "HUAWEICLOUD_Username",
+            "HUAWEICLOUD_Password",
+            "HUAWEICLOUD_DomainName",
+        ]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("HUAWEICLOUD_Username")
-            .ok_or_else(|| Error::Config("HUAWEICLOUD_Username required".into()))?.clone();
-        let password = env.get("HUAWEICLOUD_Password")
-            .ok_or_else(|| Error::Config("HUAWEICLOUD_Password required".into()))?.clone();
-        let domain_name = env.get("HUAWEICLOUD_DomainName")
-            .ok_or_else(|| Error::Config("HUAWEICLOUD_DomainName required".into()))?.clone();
-        Ok(Box::new(Huaweicloud { username, password, domain_name }))
+        let username = env
+            .get("HUAWEICLOUD_Username")
+            .ok_or_else(|| Error::Config("HUAWEICLOUD_Username required".into()))?
+            .clone();
+        let password = env
+            .get("HUAWEICLOUD_Password")
+            .ok_or_else(|| Error::Config("HUAWEICLOUD_Password required".into()))?
+            .clone();
+        let domain_name = env
+            .get("HUAWEICLOUD_DomainName")
+            .ok_or_else(|| Error::Config("HUAWEICLOUD_DomainName required".into()))?
+            .clone();
+        Ok(Box::new(Huaweicloud {
+            username,
+            password,
+            domain_name,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -106,11 +121,16 @@ impl Huaweicloud {
             &serde_json::to_vec(&body).unwrap(),
             "application/json;charset=utf8",
             &[],
-        ).map_err(|e| Error::Provider(format!("huaweicloud get token: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("huaweicloud get token: {e}")))?;
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("huaweicloud get token: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "huaweicloud get token: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
-        resp.headers.get("x-subject-token")
+        resp.headers
+            .get("x-subject-token")
             .cloned()
             .ok_or_else(|| Error::Provider("huaweicloud: no X-Subject-Token in response".into()))
     }
@@ -137,11 +157,19 @@ impl Huaweicloud {
                 }
             }
         }
-        Err(Error::Provider(format!("huaweicloud: zone not found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "huaweicloud: zone not found for {fulldomain}"
+        )))
     }
 
-    fn get_recordset_id(&self, token: &str, fulldomain: &str, zone_id: &str) -> Result<Option<String>, Error> {
-        let url = format!("{DNS_API}/v2/zones/{zone_id}/recordsets?name={fulldomain}&status=ACTIVE");
+    fn get_recordset_id(
+        &self,
+        token: &str,
+        fulldomain: &str,
+        zone_id: &str,
+    ) -> Result<Option<String>, Error> {
+        let url =
+            format!("{DNS_API}/v2/zones/{zone_id}/recordsets?name={fulldomain}&status=ACTIVE");
         let resp = http::get(&url, &[("X-Auth-Token", token)])
             .map_err(|e| Error::Provider(format!("huaweicloud list recordsets: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
@@ -156,18 +184,27 @@ impl Huaweicloud {
         Ok(None)
     }
 
-    fn add_record(&self, token: &str, zone_id: &str, fulldomain: &str, txtvalue: &str) -> ProviderResult {
-        let url = format!("{DNS_API}/v2/zones/{zone_id}/recordsets?name={fulldomain}&status=ACTIVE");
+    fn add_record(
+        &self,
+        token: &str,
+        zone_id: &str,
+        fulldomain: &str,
+        txtvalue: &str,
+    ) -> ProviderResult {
+        let url =
+            format!("{DNS_API}/v2/zones/{zone_id}/recordsets?name={fulldomain}&status=ACTIVE");
         let resp = http::get(&url, &[("X-Auth-Token", token)])
             .map_err(|e| Error::Provider(format!("huaweicloud get records: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("huaweicloud records: {e}")))?;
 
-        let existing = v.get("recordsets").and_then(|r| r.as_array())
+        let existing = v
+            .get("recordsets")
+            .and_then(|r| r.as_array())
             .and_then(|arr| arr.first())
             .and_then(|rs| rs.get("records").and_then(|r| r.as_array()).cloned());
 
-        let quoted_value = format!("\"{txtvalue}\"");
+        let quoted_value = helpers::txt_value(txtvalue);
         let mut records: Vec<Value> = existing.unwrap_or_default();
         records.push(Value::String(quoted_value));
 
@@ -183,16 +220,29 @@ impl Huaweicloud {
 
         let http_resp = if let Some(rid) = record_id {
             let put_url = format!("{DNS_API}/v2/zones/{zone_id}/recordsets/{rid}");
-            http::put(&put_url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("X-Auth-Token", token)])
-                .map_err(|e| Error::Provider(format!("huaweicloud update record: {e}")))?
+            http::put(
+                &put_url,
+                &serde_json::to_vec(&body).unwrap(),
+                "application/json",
+                &[("X-Auth-Token", token)],
+            )
+            .map_err(|e| Error::Provider(format!("huaweicloud update record: {e}")))?
         } else {
             let post_url = format!("{DNS_API}/v2/zones/{zone_id}/recordsets");
-            http::post(&post_url, &serde_json::to_vec(&body).unwrap(), "application/json", &[("X-Auth-Token", token)])
-                .map_err(|e| Error::Provider(format!("huaweicloud add record: {e}")))?
+            http::post(
+                &post_url,
+                &serde_json::to_vec(&body).unwrap(),
+                "application/json",
+                &[("X-Auth-Token", token)],
+            )
+            .map_err(|e| Error::Provider(format!("huaweicloud add record: {e}")))?
         };
 
         if http_resp.status != 202 {
-            return Err(Error::Provider(format!("huaweicloud add record: HTTP {} {}", http_resp.status, http_resp.body)));
+            return Err(Error::Provider(format!(
+                "huaweicloud add record: HTTP {} {}",
+                http_resp.status, http_resp.body
+            )));
         }
         Ok(())
     }

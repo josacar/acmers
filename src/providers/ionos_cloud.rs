@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -19,7 +19,8 @@ impl DnsProvider for IonosCloud {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let token = env.get("IONOS_CLOUD_TOKEN")
+        let token = env
+            .get("IONOS_CLOUD_TOKEN")
             .ok_or_else(|| Error::Config("IONOS_CLOUD_TOKEN required".into()))?
             .clone();
         Ok(Box::new(IonosCloud { token }))
@@ -36,10 +37,18 @@ impl DnsProvider for IonosCloud {
             "ttl": 120,
         });
         let url = format!("https://dns.de-fra.ionos.com/zones/{zone_id}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
-            .map_err(|e| Error::Provider(format!("ionos_cloud add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("ionos_cloud add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("ionos_cloud add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "ionos_cloud add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -70,14 +79,18 @@ impl DnsProvider for IonosCloud {
                 if r.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && r.get("name").and_then(|n| n.as_str()) == Some(name)
                     && r.get("content").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = r.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = r.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://dns.de-fra.ionos.com/zones/{zone_id}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url =
+                        format!("https://dns.de-fra.ionos.com/zones/{zone_id}/records/{id}");
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }
@@ -95,14 +108,17 @@ impl IonosCloud {
             .map_err(|e| Error::Json(format!("ionos_cloud parse zones: {e}")))?;
         if let Some(arr) = v.as_array() {
             for z in arr {
-                if let Some(nm) = z.get("name").and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        if let Some(id) = z.get("id").and_then(|i| {
-                            if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                        }) {
-                            return Ok(id);
+                if let Some(nm) = z.get("name").and_then(|n| n.as_str())
+                    && (domain == nm || domain.ends_with(&format!(".{nm}")))
+                    && let Some(id) = z.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
                         }
-                    }
+                    })
+                {
+                    return Ok(id);
                 }
             }
         }

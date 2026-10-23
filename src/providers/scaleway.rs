@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -20,8 +20,10 @@ impl DnsProvider for Scaleway {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_token = env.get("SCALEWAY_API_TOKEN")
-            .ok_or_else(|| Error::Config("SCALEWAY_API_TOKEN required".into()))?.clone();
+        let api_token = env
+            .get("SCALEWAY_API_TOKEN")
+            .ok_or_else(|| Error::Config("SCALEWAY_API_TOKEN required".into()))?
+            .clone();
         Ok(Box::new(Scaleway {
             api_token,
             project_id: env.get("SCALEWAY_PROJECT_ID").cloned(),
@@ -43,11 +45,18 @@ impl DnsProvider for Scaleway {
                 }
             }]
         });
-        let resp = http::patch(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("X-Auth-Token", &self.api_token)])
-            .map_err(|e| Error::Provider(format!("scaleway add TXT: {e}")))?;
+        let resp = http::patch(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("X-Auth-Token", &self.api_token)],
+        )
+        .map_err(|e| Error::Provider(format!("scaleway add TXT: {e}")))?;
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("scaleway add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "scaleway add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -66,9 +75,13 @@ impl DnsProvider for Scaleway {
                 }
             }]
         });
-        http::patch(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("X-Auth-Token", &self.api_token)])
-            .map_err(|e| Error::Provider(format!("scaleway delete TXT: {e}")))?;
+        http::patch(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("X-Auth-Token", &self.api_token)],
+        )
+        .map_err(|e| Error::Provider(format!("scaleway delete TXT: {e}")))?;
         Ok(())
     }
 }
@@ -83,16 +96,17 @@ impl Scaleway {
             .map_err(|e| Error::Provider(format!("scaleway list zones: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("scaleway zones: {e}")))?;
-        let zones = v.get("dns_zones").and_then(|z| z.as_array())
+        let zones = v
+            .get("dns_zones")
+            .and_then(|z| z.as_array())
             .or_else(|| v.as_array());
         if let Some(arr) = zones {
             for z in arr {
-                if let Some(nm) = z.get("domain").and_then(|n| n.as_str()) {
-                    if domain == nm || domain.ends_with(&format!(".{nm}")) {
-                        if let Some(id) = z.get("id").and_then(|i| i.as_str()) {
-                            return Ok(id.to_string());
-                        }
-                    }
+                if let Some(nm) = z.get("domain").and_then(|n| n.as_str())
+                    && (domain == nm || domain.ends_with(&format!(".{nm}")))
+                    && let Some(id) = z.get("id").and_then(|i| i.as_str())
+                {
+                    return Ok(id.to_string());
                 }
             }
         }

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -22,10 +22,12 @@ impl DnsProvider for Qc {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("QC_API_KEY")
+        let key = env
+            .get("QC_API_KEY")
             .ok_or_else(|| Error::Config("QC_API_KEY required".into()))?
             .clone();
-        let email = env.get("QC_API_EMAIL")
+        let email = env
+            .get("QC_API_EMAIL")
             .ok_or_else(|| Error::Config("QC_API_EMAIL required".into()))?
             .clone();
         Ok(Box::new(Qc { key, email }))
@@ -41,11 +43,18 @@ impl DnsProvider for Qc {
             "ttl": 1800,
         });
         let url = format!("{BASE_URL}/zones/{domain_id}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("X-Auth-Email", &self.email), ("X-Auth-Key", &self.key)])
-            .map_err(|e| Error::Provider(format!("qc add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("X-Auth-Email", &self.email), ("X-Auth-Key", &self.key)],
+        )
+        .map_err(|e| Error::Provider(format!("qc add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("qc add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "qc add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -57,7 +66,10 @@ impl DnsProvider for Qc {
         };
 
         let list_url = format!("{BASE_URL}/zones/{domain_id}/records");
-        let resp = match http::get(&list_url, &[("X-Auth-Email", &self.email), ("X-Auth-Key", &self.key)]) {
+        let resp = match http::get(
+            &list_url,
+            &[("X-Auth-Email", &self.email), ("X-Auth-Key", &self.key)],
+        ) {
             Ok(r) => r,
             Err(_) => return Ok(()),
         };
@@ -65,7 +77,8 @@ impl DnsProvider for Qc {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records = v.as_array()
+        let records = v
+            .as_array()
             .or_else(|| v.get("data").and_then(|d| d.as_array()))
             .or_else(|| v.get("records").and_then(|r| r.as_array()));
         if let Some(records) = records {
@@ -73,12 +86,14 @@ impl DnsProvider for Qc {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("content").and_then(|c| c.as_str()) == Some(value)
+                    && let Some(id) = record_id(record)
                 {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/zones/{domain_id}/records/{id}");
-                        let _ = http::delete(&del_url, &[("X-Auth-Email", &self.email), ("X-Auth-Key", &self.key)]);
-                        return Ok(());
-                    }
+                    let del_url = format!("{BASE_URL}/zones/{domain_id}/records/{id}");
+                    let _ = http::delete(
+                        &del_url,
+                        &[("X-Auth-Email", &self.email), ("X-Auth-Key", &self.key)],
+                    );
+                    return Ok(());
                 }
             }
         }
@@ -89,14 +104,21 @@ impl DnsProvider for Qc {
 impl Qc {
     fn resolve_zone(&self, domain: &str) -> Result<String, Error> {
         let url = format!("{BASE_URL}/zones");
-        let resp = http::get(&url, &[("X-Auth-Email", &self.email), ("X-Auth-Key", &self.key)])
-            .map_err(|e| Error::Provider(format!("qc zones: {e}")))?;
+        let resp = http::get(
+            &url,
+            &[("X-Auth-Email", &self.email), ("X-Auth-Key", &self.key)],
+        )
+        .map_err(|e| Error::Provider(format!("qc zones: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("qc zones: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "qc zones: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Provider(format!("qc zones: {e}")))?;
-        let zones = v.as_array()
+        let zones = v
+            .as_array()
             .or_else(|| v.get("data").and_then(|d| d.as_array()))
             .or_else(|| v.get("zones").and_then(|z| z.as_array()));
         if let Some(zones) = zones {
@@ -115,9 +137,14 @@ impl Qc {
 
 fn record_id(v: &Value) -> Option<String> {
     v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
+        if i.is_string() {
+            i.as_str().map(|s| s.to_string())
+        } else if i.is_u64() {
+            i.as_u64().map(|n| n.to_string())
+        } else if i.is_i64() {
+            i.as_i64().map(|n| n.to_string())
+        } else {
+            None
+        }
     })
 }

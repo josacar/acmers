@@ -51,15 +51,19 @@ impl Infoblox {
         let resp = http::get(&url, &hdrs)
             .map_err(|e| Error::Provider(format!("infoblox find record: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("infoblox find record: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "infoblox find record: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let records: Vec<serde_json::Value> = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Provider(format!("infoblox find record: {e}")))?;
         for record in &records {
-            if let Some(r#ref) = record.get("_ref").and_then(|v| v.as_str()) {
-                if r#ref.contains("record:txt/") && r#ref.contains(&self.view_encoded) {
-                    return Ok(Some(r#ref.to_string()));
-                }
+            if let Some(r#ref) = record.get("_ref").and_then(|v| v.as_str())
+                && r#ref.contains("record:txt/")
+                && r#ref.contains(&self.view_encoded)
+            {
+                return Ok(Some(r#ref.to_string()));
             }
         }
         Ok(None)
@@ -76,14 +80,23 @@ impl DnsProvider for Infoblox {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let creds = env.get("Infoblox_Creds")
+        let creds = env
+            .get("Infoblox_Creds")
             .ok_or_else(|| Error::Config("Infoblox_Creds required".into()))?;
-        let server = env.get("Infoblox_Server")
+        let server = env
+            .get("Infoblox_Server")
             .ok_or_else(|| Error::Config("Infoblox_Server required".into()))?;
-        let view = env.get("Infoblox_View").map(|s| s.as_str()).unwrap_or("default");
+        let view = env
+            .get("Infoblox_View")
+            .map(|s| s.as_str())
+            .unwrap_or("default");
         let basic_auth = format!("Basic {}", base64::encode_std(creds.as_bytes()));
         let view_encoded = percent_encode(view);
-        Ok(Box::new(Infoblox { basic_auth, server: server.clone(), view_encoded }))
+        Ok(Box::new(Infoblox {
+            basic_auth,
+            server: server.clone(),
+            view_encoded,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -98,17 +111,23 @@ impl DnsProvider for Infoblox {
         let resp = http::post(&url, b"", "application/json", &hdrs)
             .map_err(|e| Error::Provider(format!("infoblox add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("infoblox add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "infoblox add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         if let Some(r#ref) = serde_json::from_str::<serde_json::Value>(&resp.body)
             .ok()
             .and_then(|v| v.as_str().map(|s| s.to_string()))
+            && r#ref.contains("record:txt/")
+            && r#ref.contains(&self.view_encoded)
         {
-            if r#ref.contains("record:txt/") && r#ref.contains(&self.view_encoded) {
-                return Ok(());
-            }
+            return Ok(());
         }
-        Err(Error::Provider(format!("infoblox add TXT: unexpected response: {}", resp.body)))
+        Err(Error::Provider(format!(
+            "infoblox add TXT: unexpected response: {}",
+            resp.body
+        )))
     }
 
     fn remove_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -125,7 +144,10 @@ impl DnsProvider for Infoblox {
         let resp = http::delete(&url, &hdrs)
             .map_err(|e| Error::Provider(format!("infoblox remove TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("infoblox remove TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "infoblox remove TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }

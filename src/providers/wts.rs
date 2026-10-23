@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -23,10 +23,12 @@ impl DnsProvider for Wts {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let key = env.get("WTS_Key")
+        let key = env
+            .get("WTS_Key")
             .ok_or_else(|| Error::Config("WTS_Key required".into()))?
             .clone();
-        let secret = env.get("WTS_Secret")
+        let secret = env
+            .get("WTS_Secret")
             .ok_or_else(|| Error::Config("WTS_Secret required".into()))?
             .clone();
         Ok(Box::new(Wts { key, secret }))
@@ -43,11 +45,18 @@ impl DnsProvider for Wts {
             "ttl": 120,
         });
         let url = format!("{BASE_URL}/domains/{domain}/records");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("wts add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("wts add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("wts add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "wts add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -65,19 +74,19 @@ impl DnsProvider for Wts {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records = v.as_array()
+        let records = v
+            .as_array()
             .or_else(|| v.get("data").and_then(|d| d.as_array()))
             .or_else(|| v.get("records").and_then(|r| r.as_array()));
         if let Some(records) = records {
             for record in records {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(rec_name)
+                    && let Some(id) = record_id(record)
                 {
-                    if let Some(id) = record_id(record) {
-                        let del_url = format!("{BASE_URL}/domains/{domain}/records/{id}");
-                        let _ = http::delete(&del_url, &[("Authorization", &auth)]);
-                        return Ok(());
-                    }
+                    let del_url = format!("{BASE_URL}/domains/{domain}/records/{id}");
+                    let _ = http::delete(&del_url, &[("Authorization", &auth)]);
+                    return Ok(());
                 }
             }
         }
@@ -92,9 +101,14 @@ fn auth_header(user: &str, pass: &str) -> String {
 
 fn record_id(v: &Value) -> Option<String> {
     v.get("id").and_then(|i| {
-        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-        else { None }
+        if i.is_string() {
+            i.as_str().map(|s| s.to_string())
+        } else if i.is_u64() {
+            i.as_u64().map(|n| n.to_string())
+        } else if i.is_i64() {
+            i.as_i64().map(|n| n.to_string())
+        } else {
+            None
+        }
     })
 }

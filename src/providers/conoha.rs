@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -18,23 +18,37 @@ impl DnsProvider for Conoha {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["CONOHA_Username", "CONOHA_Password", "CONOHA_TenantId", "CONOHA_IdentityServiceApi"]
+        &[
+            "CONOHA_Username",
+            "CONOHA_Password",
+            "CONOHA_TenantId",
+            "CONOHA_IdentityServiceApi",
+        ]
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("CONOHA_Username")
+        let username = env
+            .get("CONOHA_Username")
             .ok_or_else(|| Error::Config("CONOHA_Username required".into()))?
             .clone();
-        let password = env.get("CONOHA_Password")
+        let password = env
+            .get("CONOHA_Password")
             .ok_or_else(|| Error::Config("CONOHA_Password required".into()))?
             .clone();
-        let tenant_id = env.get("CONOHA_TenantId")
+        let tenant_id = env
+            .get("CONOHA_TenantId")
             .ok_or_else(|| Error::Config("CONOHA_TenantId required".into()))?
             .clone();
-        let identity_api = env.get("CONOHA_IdentityServiceApi")
+        let identity_api = env
+            .get("CONOHA_IdentityServiceApi")
             .cloned()
             .unwrap_or_else(|| "https://identity.tyo1.conoha.io/v2.0".to_string());
-        Ok(Box::new(Conoha { username, password, tenant_id, identity_api }))
+        Ok(Box::new(Conoha {
+            username,
+            password,
+            tenant_id,
+            identity_api,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -46,12 +60,19 @@ impl DnsProvider for Conoha {
             "type": "TXT",
             "data": value,
             "ttl": 120,
-        })).unwrap();
-        let url = format!("https://dns-service.tyo1.conoha.io/v1/{}/domains/{}/records", self.tenant_id, domain_id);
+        }))
+        .unwrap();
+        let url = format!(
+            "https://dns-service.tyo1.conoha.io/v1/{}/domains/{}/records",
+            self.tenant_id, domain_id
+        );
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("Conoha add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("Conoha add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "Conoha add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -66,7 +87,10 @@ impl DnsProvider for Conoha {
             Ok(d) => d,
             Err(_) => return Ok(()),
         };
-        let list_url = format!("https://dns-service.tyo1.conoha.io/v1/{}/domains/{}/records", self.tenant_id, domain_id);
+        let list_url = format!(
+            "https://dns-service.tyo1.conoha.io/v1/{}/domains/{}/records",
+            self.tenant_id, domain_id
+        );
         let resp = match http::get(&list_url, headers) {
             Ok(r) => r,
             Err(_) => return Ok(()),
@@ -80,14 +104,20 @@ impl DnsProvider for Conoha {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("data").and_then(|d| d.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("https://dns-service.tyo1.conoha.io/v1/{}/domains/{}/records/{id}", self.tenant_id, domain_id);
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url = format!(
+                        "https://dns-service.tyo1.conoha.io/v1/{}/domains/{}/records/{id}",
+                        self.tenant_id, domain_id
+                    );
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }
@@ -105,31 +135,42 @@ impl Conoha {
                 },
                 "tenantId": self.tenant_id,
             }
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("{}/tokens", self.identity_api);
         let resp = http::post(&url, &body, "application/json", &[])
             .map_err(|e| Error::Provider(format!("Conoha auth: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Conoha auth: {e}")))?;
-        v.pointer("/access/token/id").and_then(|i| i.as_str())
+        v.pointer("/access/token/id")
+            .and_then(|i| i.as_str())
             .map(|s| s.to_string())
-            .ok_or_else(|| Error::Provider(format!("Conoha auth: no token in response: {}", resp.body)))
+            .ok_or_else(|| {
+                Error::Provider(format!("Conoha auth: no token in response: {}", resp.body))
+            })
     }
 
     fn resolve_zone(&self, domain: &str, headers: &[(&str, &str)]) -> Result<String, Error> {
-        let url = format!("https://dns-service.tyo1.conoha.io/v1/{}/domains", self.tenant_id);
+        let url = format!(
+            "https://dns-service.tyo1.conoha.io/v1/{}/domains",
+            self.tenant_id
+        );
         let resp = http::get(&url, headers)
             .map_err(|e| Error::Provider(format!("Conoha list zones: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("Conoha zones: {e}")))?;
         if let Some(domains) = v.get("domains").and_then(|d| d.as_array()) {
             for d in domains {
-                if d.get("name").and_then(|n| n.as_str()) == Some(domain) {
-                    if let Some(id) = d.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        return Ok(id);
-                    }
+                if d.get("name").and_then(|n| n.as_str()) == Some(domain)
+                    && let Some(id) = d.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
+                {
+                    return Ok(id);
                 }
             }
         }

@@ -22,16 +22,23 @@ impl DnsProvider for Autodns {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let user = env.get("AUTODNS_USER")
+        let user = env
+            .get("AUTODNS_USER")
             .ok_or_else(|| Error::Config("AUTODNS_USER required".into()))?
             .clone();
-        let password = env.get("AUTODNS_PASSWORD")
+        let password = env
+            .get("AUTODNS_PASSWORD")
             .ok_or_else(|| Error::Config("AUTODNS_PASSWORD required".into()))?
             .clone();
-        let context = env.get("AUTODNS_CONTEXT")
+        let context = env
+            .get("AUTODNS_CONTEXT")
             .ok_or_else(|| Error::Config("AUTODNS_CONTEXT required".into()))?
             .clone();
-        Ok(Box::new(Autodns { user, password, context }))
+        Ok(Box::new(Autodns {
+            user,
+            password,
+            context,
+        }))
     }
 
     fn add_txt(&self, _domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -87,7 +94,14 @@ impl Autodns {
         )
     }
 
-    fn build_zone_update_xml(&self, zone: &str, subdomain: &str, txtvalue: &str, system_ns: &str, add: bool) -> String {
+    fn build_zone_update_xml(
+        &self,
+        zone: &str,
+        subdomain: &str,
+        txtvalue: &str,
+        system_ns: &str,
+        add: bool,
+    ) -> String {
         let tag = if add { "rr_add" } else { "rr_rem" };
         format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -148,10 +162,19 @@ impl Autodns {
                 return Ok((zone, sub_domain, system_ns));
             }
         }
-        Err(Error::Provider(format!("autodns: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "autodns: zone not found for {domain}"
+        )))
     }
 
-    fn zone_update(&self, zone: &str, subdomain: &str, txtvalue: &str, system_ns: &str, add: bool) -> Result<(), Error> {
+    fn zone_update(
+        &self,
+        zone: &str,
+        subdomain: &str,
+        txtvalue: &str,
+        system_ns: &str,
+        add: bool,
+    ) -> Result<(), Error> {
         let xml = self.build_zone_update_xml(zone, subdomain, txtvalue, system_ns, add);
         self.api_call(&xml)?;
         Ok(())

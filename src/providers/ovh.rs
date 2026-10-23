@@ -24,20 +24,29 @@ impl DnsProvider for Ovh {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let ak = env.get("OVH_AK")
+        let ak = env
+            .get("OVH_AK")
             .ok_or_else(|| Error::Config("OVH_AK required".into()))?
             .clone();
-        let as_ = env.get("OVH_AS")
+        let as_ = env
+            .get("OVH_AS")
             .ok_or_else(|| Error::Config("OVH_AS required".into()))?
             .clone();
-        let ck = env.get("OVH_CK")
+        let ck = env
+            .get("OVH_CK")
             .ok_or_else(|| Error::Config("OVH_CK required".into()))?
             .clone();
-        let endpoint = env.get("OVH_END_POINT")
+        let endpoint = env
+            .get("OVH_END_POINT")
             .ok_or_else(|| Error::Config("OVH_END_POINT required".into()))?
             .clone();
         let base_url = format!("https://{endpoint}/1.0");
-        Ok(Box::new(Ovh { ak, as_, ck, base_url }))
+        Ok(Box::new(Ovh {
+            ak,
+            as_,
+            ck,
+            base_url,
+        }))
     }
 
     fn add_txt(&self, domain: &str, name: &str, value: &str) -> ProviderResult {
@@ -72,10 +81,14 @@ impl DnsProvider for Ovh {
                 ("X-Ovh-Consumer", &self.ck),
                 ("X-Ovh-Signature", &signature),
             ],
-        ).map_err(|e| Error::Provider(format!("OVH add TXT: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("OVH add TXT: {e}")))?;
 
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("OVH add TXT: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "OVH add TXT: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -138,27 +151,31 @@ impl Ovh {
                 ("X-Ovh-Consumer", &self.ck),
                 ("X-Ovh-Signature", &signature),
             ],
-        ).map_err(|e| Error::Provider(format!("OVH list zones: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("OVH list zones: {e}")))?;
 
         if resp.status >= 300 {
-            return Err(Error::Provider(format!("OVH list zones: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "OVH list zones: {} {}",
+                resp.status, resp.body
+            )));
         }
 
-        let v: serde_json::Value = serde_json::from_str(&resp.body)
-            .map_err(|e| Error::Json(format!("OVH zones: {e}")))?;
+        let v: serde_json::Value =
+            serde_json::from_str(&resp.body).map_err(|e| Error::Json(format!("OVH zones: {e}")))?;
 
         let mut best_len = 0;
         let mut best_name = String::new();
 
         if let Some(zones) = v.as_array() {
             for zone in zones {
-                if let Some(name) = zone.as_str() {
-                    if domain == name || domain.ends_with(&format!(".{name}")) {
-                        let len = name.len();
-                        if len > best_len {
-                            best_len = len;
-                            best_name = name.to_string();
-                        }
+                if let Some(name) = zone.as_str()
+                    && (domain == name || domain.ends_with(&format!(".{name}")))
+                {
+                    let len = name.len();
+                    if len > best_len {
+                        best_len = len;
+                        best_name = name.to_string();
                     }
                 }
             }
@@ -170,7 +187,12 @@ impl Ovh {
         Ok(best_name)
     }
 
-    fn find_record(&self, zone: &str, short_name: &str, value: &str) -> Result<Option<String>, Error> {
+    fn find_record(
+        &self,
+        zone: &str,
+        short_name: &str,
+        value: &str,
+    ) -> Result<Option<String>, Error> {
         let url_path = format!("/domain/zone/{zone}/record?fieldType=TXT&subDomain={short_name}");
         let url = format!("{}{url_path}", self.base_url);
 
@@ -190,7 +212,8 @@ impl Ovh {
                 ("X-Ovh-Consumer", &self.ck),
                 ("X-Ovh-Signature", &signature),
             ],
-        ).map_err(|e| Error::Provider(format!("OVH list records: {e}")))?;
+        )
+        .map_err(|e| Error::Provider(format!("OVH list records: {e}")))?;
 
         if resp.status >= 300 {
             return Ok(None);
@@ -202,10 +225,10 @@ impl Ovh {
         if let Some(records) = v.as_array() {
             for record in records {
                 let target = record.get("target").and_then(|t| t.as_str()).unwrap_or("");
-                if target == value {
-                    if let Some(id) = record.get("id").and_then(|i| i.as_i64()) {
-                        return Ok(Some(id.to_string()));
-                    }
+                if target == value
+                    && let Some(id) = record.get("id").and_then(|i| i.as_i64())
+                {
+                    return Ok(Some(id.to_string()));
                 }
             }
         }
@@ -213,7 +236,14 @@ impl Ovh {
     }
 }
 
-fn ovh_signature(as_: &str, ck: &str, method: &str, url: &str, body: &str, timestamp: &str) -> String {
+fn ovh_signature(
+    as_: &str,
+    ck: &str,
+    method: &str,
+    url: &str,
+    body: &str,
+    timestamp: &str,
+) -> String {
     let to_sign = format!("{as_}+{ck}+{method}+{url}+{body}+{timestamp}");
     let d = digest::digest(&digest::SHA1_FOR_LEGACY_USE_ONLY, to_sign.as_bytes());
     format!("$1${}", base64::hex(d.as_ref()))

@@ -4,191 +4,248 @@ use mock::MockServer;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+type MockHandler = Arc<
+    dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>)
+        + Send
+        + Sync,
+>;
+
 #[test]
 fn test_cloudflare_add_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, _headers| {
+    let handler: MockHandler = Arc::new(|method, path, _body, _headers| {
         // Zone validation: GET /client/v4/zones/{zone_id}
         if method == "GET" && path == "/client/v4/zones/zone123" {
-            return (200, serde_json::json!({
-                "result": {
-                    "id": "zone123",
-                    "name": "example.com",
-                    "status": "active"
-                },
-                "success": true
-            }).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({
+                    "result": {
+                        "id": "zone123",
+                        "name": "example.com",
+                        "status": "active"
+                    },
+                    "success": true
+                })
+                .to_string(),
+                HashMap::new(),
+            );
         }
-        
+
         // Zone search: GET /client/v4/zones?name=...
         if method == "GET" && path.starts_with("/client/v4/zones?") {
-            return (200, serde_json::json!({
-                "result": [{
-                    "id": "zone123",
-                    "name": "example.com",
-                    "status": "active"
-                }],
-                "success": true
-            }).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({
+                    "result": [{
+                        "id": "zone123",
+                        "name": "example.com",
+                        "status": "active"
+                    }],
+                    "success": true
+                })
+                .to_string(),
+                HashMap::new(),
+            );
         }
 
         // List DNS records: GET /client/v4/zones/{zone_id}/dns_records
         if method == "GET" && path.contains("/client/v4/zones/zone123/dns_records") {
-            return (200, serde_json::json!({
-                "result": [{
-                    "id": "rec456",
-                    "type": "TXT",
-                    "name": "_acme-challenge.example.com",
-                    "content": "\"test-challenge-value\""
-                }],
-                "success": true
-            }).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({
+                    "result": [{
+                        "id": "rec456",
+                        "type": "TXT",
+                        "name": "_acme-challenge.example.com",
+                        "content": "\"test-challenge-value\""
+                    }],
+                    "success": true
+                })
+                .to_string(),
+                HashMap::new(),
+            );
         }
 
         // Delete DNS record: DELETE /client/v4/zones/{zone_id}/dns_records/{id}
         if method == "DELETE" && path.starts_with("/client/v4/zones/zone123/dns_records/") {
-            return (200, serde_json::json!({"success": true}).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({"success": true}).to_string(),
+                HashMap::new(),
+            );
         }
 
         // Add DNS record: POST /client/v4/zones/{zone_id}/dns_records
         if method == "POST" && path == "/client/v4/zones/zone123/dns_records" {
-            return (200, serde_json::json!({
-                "result": {
-                    "id": "rec456",
-                    "type": "TXT",
-                    "name": "_acme-challenge.example.com",
-                    "content": "\"test-challenge-value\"",
-                    "ttl": 120
-                },
-                "success": true
-            }).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({
+                    "result": {
+                        "id": "rec456",
+                        "type": "TXT",
+                        "name": "_acme-challenge.example.com",
+                        "content": "\"test-challenge-value\"",
+                        "ttl": 120
+                    },
+                    "success": true
+                })
+                .to_string(),
+                HashMap::new(),
+            );
         }
-        
-        (404, r#"{"success":false,"errors":[{"message":"not found"}]}"#.to_string(), HashMap::new())
+
+        (
+            404,
+            r#"{"success":false,"errors":[{"message":"not found"}]}"#.to_string(),
+            HashMap::new(),
+        )
     });
-    
+
     let server = MockServer::new(handler);
     acmers::http::set_test_base(&server.url());
-    
+
     let mut env = HashMap::new();
     env.insert("CF_Token".to_string(), "test-token".to_string());
     env.insert("CF_Zone_ID".to_string(), "zone123".to_string());
     let cf = acmers::providers::find("cf").unwrap();
     let provider = (cf.create)(&env).unwrap();
-    
-    let result = provider.add_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+
+    let result = provider.add_txt(
+        "example.com",
+        "_acme-challenge.example.com",
+        "test-challenge-value",
+    );
     assert!(result.is_ok(), "CF add_txt failed: {:?}", result.err());
 }
 
 #[test]
 fn test_digitalocean_add_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, _headers| {
+    let handler: MockHandler = Arc::new(|method, path, _body, _headers| {
         // List domains: GET /v2/domains (exact match, must come first)
         if method == "GET" && path == "/v2/domains" {
-            return (200, serde_json::json!({
-                "domains": [{"name": "example.com", "ttl": 1800}],
-                "meta": {"total": 1}
-            }).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({
+                    "domains": [{"name": "example.com", "ttl": 1800}],
+                    "meta": {"total": 1}
+                })
+                .to_string(),
+                HashMap::new(),
+            );
         }
 
         // Add DNS record: POST /v2/domains/{domain}/records
         if method == "POST" && path == "/v2/domains/example.com/records" {
-            return (201, serde_json::json!({
-                "domain_record": {
-                    "id": 12345,
-                    "type": "TXT",
-                    "name": "_acme-challenge",
-                    "data": "test-value"
-                }
-            }).to_string(), HashMap::new());
+            return (
+                201,
+                serde_json::json!({
+                    "domain_record": {
+                        "id": 12345,
+                        "type": "TXT",
+                        "name": "_acme-challenge",
+                        "data": "test-value"
+                    }
+                })
+                .to_string(),
+                HashMap::new(),
+            );
         }
 
         // List DNS records: GET /v2/domains/{domain}/records
         if method == "GET" && path == "/v2/domains/example.com/records" {
-            return (200, serde_json::json!({
-                "domain_records": [{
-                    "id": 12345,
-                    "type": "TXT",
-                    "name": "_acme-challenge",
-                    "data": "test-value"
-                }]
-            }).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({
+                    "domain_records": [{
+                        "id": 12345,
+                        "type": "TXT",
+                        "name": "_acme-challenge",
+                        "data": "test-value"
+                    }]
+                })
+                .to_string(),
+                HashMap::new(),
+            );
         }
 
         // Delete DNS record: DELETE /v2/domains/{domain}/records/{id}
         if method == "DELETE" && path.starts_with("/v2/domains/") && path.contains("/records/") {
             return (204, "".to_string(), HashMap::new());
         }
-        
+
         (404, "{}".to_string(), HashMap::new())
     });
-    
+
     let server = MockServer::new(handler);
     acmers::http::set_test_base(&server.url());
-    
+
     let mut env = HashMap::new();
     env.insert("DO_API_KEY".to_string(), "test-key".to_string());
     let dgon = acmers::providers::find("dgon").unwrap();
     let provider = (dgon.create)(&env).unwrap();
-    
+
     let result = provider.add_txt("example.com", "_acme-challenge.example.com", "test-value");
     assert!(result.is_ok(), "DO add_txt failed: {:?}", result.err());
 }
 
 #[test]
 fn test_duckdns_add_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|_method, path, _body, _headers| {
+    let handler: MockHandler = Arc::new(|_method, path, _body, _headers| {
         if path.contains("/update") {
             return (200, "OK".to_string(), HashMap::new());
         }
         (404, "{}".to_string(), HashMap::new())
     });
-    
+
     let server = MockServer::new(handler);
     acmers::http::set_test_base(&server.url());
-    
+
     let mut env = HashMap::new();
     env.insert("DuckDNS_Token".to_string(), "test-token".to_string());
     let duck = acmers::providers::find("duckdns").unwrap();
     let provider = (duck.create)(&env).unwrap();
-    
+
     let result = provider.add_txt("example", "_acme-challenge", "test-value");
     assert!(result.is_ok(), "DuckDNS add_txt failed: {:?}", result.err());
 }
 
 #[test]
 fn test_godaddy_add_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, _headers| {
+    let handler: MockHandler = Arc::new(|method, path, _body, _headers| {
         // List records: GET /v1/domains/{domain}/records
         if method == "GET" && path == "/v1/domains/example.com/records" {
             return (200, "[]".to_string(), HashMap::new());
         }
-        
+
         // Update records: PUT /v1/domains/{domain}/records
         if method == "PUT" && path == "/v1/domains/example.com/records" {
             return (200, "{}".to_string(), HashMap::new());
         }
-        
+
         (404, "{}".to_string(), HashMap::new())
     });
-    
+
     let server = MockServer::new(handler);
     acmers::http::set_test_base(&server.url());
-    
+
     let mut env = HashMap::new();
     env.insert("GD_Key".to_string(), "test-key".to_string());
     env.insert("GD_Secret".to_string(), "test-secret".to_string());
     let gd = acmers::providers::find("gd").unwrap();
     let provider = (gd.create)(&env).unwrap();
-    
+
     let result = provider.add_txt("example.com", "_acme-challenge", "test-value");
     assert!(result.is_ok(), "GoDaddy add_txt failed: {:?}", result.err());
 }
 
 #[test]
 fn test_porkbun_add_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|_method, path, body, _headers| {
+    let handler: MockHandler = Arc::new(|_method, path, _body, _headers| {
         if path.contains("/dns/create/") {
-            return (200, serde_json::json!({"status": "SUCCESS", "id": 12345}).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({"status": "SUCCESS", "id": 12345}).to_string(),
+                HashMap::new(),
+            );
         }
         if path.contains("/dns/retrieve/") {
             return (200, serde_json::json!({
@@ -198,23 +255,26 @@ fn test_porkbun_add_txt() {
         }
         (200, "{}".to_string(), HashMap::new())
     });
-    
+
     let server = MockServer::new(handler);
     acmers::http::set_test_base(&server.url());
-    
+
     let mut env = HashMap::new();
     env.insert("PORKBUN_API_KEY".to_string(), "test-key".to_string());
-    env.insert("PORKBUN_SECRET_API_KEY".to_string(), "test-secret".to_string());
+    env.insert(
+        "PORKBUN_SECRET_API_KEY".to_string(),
+        "test-secret".to_string(),
+    );
     let pb = acmers::providers::find("porkbun").unwrap();
     let provider = (pb.create)(&env).unwrap();
-    
+
     let result = provider.add_txt("example.com", "_acme-challenge", "test-value");
     assert!(result.is_ok(), "Porkbun add_txt failed: {:?}", result.err());
 }
 
 #[test]
 fn test_kas_add_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, body, _headers| {
+    let handler: MockHandler = Arc::new(|method, path, body, _headers| {
         if method == "GET" && path.contains("KasApi.wsdl") {
             let wsdl = r#"<?xml version="1.0"?><definitions xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"><service name="KasApiService"><port name="KasApiPort"><soap:address location="https://kasapi.kasserver.com/soap/v1/KasApi.php"/></port></service></definitions>"#;
             return (200, wsdl.to_string(), HashMap::new());
@@ -259,13 +319,17 @@ fn test_kas_add_txt() {
     let kas = acmers::providers::find("kas").unwrap();
     let provider = (kas.create)(&env).unwrap();
 
-    let result = provider.add_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    let result = provider.add_txt(
+        "example.com",
+        "_acme-challenge.example.com",
+        "test-challenge-value",
+    );
     assert!(result.is_ok(), "KAS add_txt failed: {:?}", result.err());
 }
 
 #[test]
 fn test_kas_remove_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, body, _headers| {
+    let handler: MockHandler = Arc::new(|method, path, body, _headers| {
         if method == "GET" && path.contains("KasApi.wsdl") {
             let wsdl = r#"<?xml version="1.0"?><definitions xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/"><service name="KasApiService"><port name="KasApiPort"><soap:address location="https://kasapi.kasserver.com/soap/v1/KasApi.php"/></port></service></definitions>"#;
             return (200, wsdl.to_string(), HashMap::new());
@@ -306,25 +370,40 @@ fn test_kas_remove_txt() {
     let kas = acmers::providers::find("kas").unwrap();
     let provider = (kas.create)(&env).unwrap();
 
-    let result = provider.remove_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    let result = provider.remove_txt(
+        "example.com",
+        "_acme-challenge.example.com",
+        "test-challenge-value",
+    );
     assert!(result.is_ok(), "KAS remove_txt failed: {:?}", result.err());
 }
 
 #[test]
 fn test_oci_add_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, headers| {
+    let handler: MockHandler = Arc::new(|method, path, _body, headers| {
         if method == "GET" && path == "/20180115/zones/example.com" {
-            return (200, serde_json::json!({
-                "id": "ocid1.dns-zone.oc1..test",
-                "name": "example.com",
-                "zoneType": "PRIMARY"
-            }).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({
+                    "id": "ocid1.dns-zone.oc1..test",
+                    "name": "example.com",
+                    "zoneType": "PRIMARY"
+                })
+                .to_string(),
+                HashMap::new(),
+            );
         }
         if method == "PATCH" && path == "/20180115/zones/example.com/records" {
-            assert!(headers.contains_key("authorization"), "missing Authorization header");
+            assert!(
+                headers.contains_key("authorization"),
+                "missing Authorization header"
+            );
             let auth = headers.get("authorization").unwrap();
             assert!(auth.starts_with("Signature "), "bad auth scheme");
-            assert!(auth.contains("keyId=\"ocid1.tenancy.oc1..test/ocid1.user.oc1..test/"), "bad keyId");
+            assert!(
+                auth.contains("keyId=\"ocid1.tenancy.oc1..test/ocid1.user.oc1..test/"),
+                "bad keyId"
+            );
             return (200, "[]".to_string(), HashMap::new());
         }
         (404, "{}".to_string(), HashMap::new())
@@ -337,24 +416,36 @@ fn test_oci_add_txt() {
 
     let mut env = HashMap::new();
     env.insert("OCI_PRIVKEY".to_string(), test_key.to_string());
-    env.insert("OCI_TENANCY".to_string(), "ocid1.tenancy.oc1..test".to_string());
+    env.insert(
+        "OCI_TENANCY".to_string(),
+        "ocid1.tenancy.oc1..test".to_string(),
+    );
     env.insert("OCI_USER".to_string(), "ocid1.user.oc1..test".to_string());
     env.insert("OCI_REGION".to_string(), "us-phoenix-1".to_string());
     let oci = acmers::providers::find("oci").unwrap();
     let provider = (oci.create)(&env).unwrap();
 
-    let result = provider.add_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    let result = provider.add_txt(
+        "example.com",
+        "_acme-challenge.example.com",
+        "test-challenge-value",
+    );
     assert!(result.is_ok(), "OCI add_txt failed: {:?}", result.err());
 }
 
 #[test]
 fn test_oci_remove_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, _headers| {
+    let handler: MockHandler = Arc::new(|method, path, _body, _headers| {
         if method == "GET" && path == "/20180115/zones/example.com" {
-            return (200, serde_json::json!({
-                "id": "ocid1.dns-zone.oc1..test",
-                "name": "example.com"
-            }).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({
+                    "id": "ocid1.dns-zone.oc1..test",
+                    "name": "example.com"
+                })
+                .to_string(),
+                HashMap::new(),
+            );
         }
         if method == "PATCH" && path == "/20180115/zones/example.com/records" {
             return (200, "[]".to_string(), HashMap::new());
@@ -369,19 +460,26 @@ fn test_oci_remove_txt() {
 
     let mut env = HashMap::new();
     env.insert("OCI_PRIVKEY".to_string(), test_key.to_string());
-    env.insert("OCI_TENANCY".to_string(), "ocid1.tenancy.oc1..test".to_string());
+    env.insert(
+        "OCI_TENANCY".to_string(),
+        "ocid1.tenancy.oc1..test".to_string(),
+    );
     env.insert("OCI_USER".to_string(), "ocid1.user.oc1..test".to_string());
     env.insert("OCI_REGION".to_string(), "us-phoenix-1".to_string());
     let oci = acmers::providers::find("oci").unwrap();
     let provider = (oci.create)(&env).unwrap();
 
-    let result = provider.remove_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    let result = provider.remove_txt(
+        "example.com",
+        "_acme-challenge.example.com",
+        "test-challenge-value",
+    );
     assert!(result.is_ok(), "OCI remove_txt failed: {:?}", result.err());
 }
 
 #[test]
 fn test_joker_add_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, body, _headers| {
+    let handler: MockHandler = Arc::new(|method, path, body, _headers| {
         if method == "POST" && path.contains("/nic/replace") {
             let body_str = String::from_utf8_lossy(body);
             if body_str.contains("label=jokerTXTUpdateTest") {
@@ -403,13 +501,17 @@ fn test_joker_add_txt() {
     let joker = acmers::providers::find("joker").unwrap();
     let provider = (joker.create)(&env).unwrap();
 
-    let result = provider.add_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    let result = provider.add_txt(
+        "example.com",
+        "_acme-challenge.example.com",
+        "test-challenge-value",
+    );
     assert!(result.is_ok(), "Joker add_txt failed: {:?}", result.err());
 }
 
 #[test]
 fn test_joker_remove_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, _headers| {
+    let handler: MockHandler = Arc::new(|method, path, _body, _headers| {
         if method == "POST" && path.contains("/nic/replace") {
             return (200, "OK: 0|1|...".to_string(), HashMap::new());
         }
@@ -425,22 +527,45 @@ fn test_joker_remove_txt() {
     let joker = acmers::providers::find("joker").unwrap();
     let provider = (joker.create)(&env).unwrap();
 
-    let result = provider.remove_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
-    assert!(result.is_ok(), "Joker remove_txt failed: {:?}", result.err());
+    let result = provider.remove_txt(
+        "example.com",
+        "_acme-challenge.example.com",
+        "test-challenge-value",
+    );
+    assert!(
+        result.is_ok(),
+        "Joker remove_txt failed: {:?}",
+        result.err()
+    );
 }
 
 #[test]
 fn test_transip_add_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, headers| {
+    let handler: MockHandler = Arc::new(|method, path, _body, headers| {
         if method == "POST" && path == "/v6/auth" {
-            assert!(headers.contains_key("signature"), "missing Signature header");
-            return (200, serde_json::json!({"token": "test-transip-token"}).to_string(), HashMap::new());
+            assert!(
+                headers.contains_key("signature"),
+                "missing Signature header"
+            );
+            return (
+                200,
+                serde_json::json!({"token": "test-transip-token"}).to_string(),
+                HashMap::new(),
+            );
         }
         if method == "GET" && path == "/v6/domains/example.com/dns" {
-            return (200, serde_json::json!({"dnsEntries": []}).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({"dnsEntries": []}).to_string(),
+                HashMap::new(),
+            );
         }
         if method == "POST" && path == "/v6/domains/example.com/dns" {
-            assert!(headers.get("authorization").is_some_and(|a| a == "Bearer test-transip-token"));
+            assert!(
+                headers
+                    .get("authorization")
+                    .is_some_and(|a| a == "Bearer test-transip-token")
+            );
             return (201, "".to_string(), HashMap::new());
         }
         (404, "{}".to_string(), HashMap::new())
@@ -457,22 +582,41 @@ fn test_transip_add_txt() {
     let transip = acmers::providers::find("transip").unwrap();
     let provider = (transip.create)(&env).unwrap();
 
-    let result = provider.add_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
+    let result = provider.add_txt(
+        "example.com",
+        "_acme-challenge.example.com",
+        "test-challenge-value",
+    );
     assert!(result.is_ok(), "TransIP add_txt failed: {:?}", result.err());
 }
 
 #[test]
 fn test_transip_remove_txt() {
-    let handler: Arc<dyn Fn(&str, &str, &[u8], &HashMap<String, String>) -> (u16, String, HashMap<String, String>) + Send + Sync> = Arc::new(|method, path, _body, headers| {
+    let handler: MockHandler = Arc::new(|method, path, _body, headers| {
         if method == "POST" && path == "/v6/auth" {
-            assert!(headers.contains_key("signature"), "missing Signature header");
-            return (200, serde_json::json!({"token": "test-transip-token"}).to_string(), HashMap::new());
+            assert!(
+                headers.contains_key("signature"),
+                "missing Signature header"
+            );
+            return (
+                200,
+                serde_json::json!({"token": "test-transip-token"}).to_string(),
+                HashMap::new(),
+            );
         }
         if method == "GET" && path == "/v6/domains/example.com/dns" {
-            return (200, serde_json::json!({"dnsEntries": []}).to_string(), HashMap::new());
+            return (
+                200,
+                serde_json::json!({"dnsEntries": []}).to_string(),
+                HashMap::new(),
+            );
         }
         if method == "DELETE" && path == "/v6/domains/example.com/dns" {
-            assert!(headers.get("authorization").is_some_and(|a| a == "Bearer test-transip-token"));
+            assert!(
+                headers
+                    .get("authorization")
+                    .is_some_and(|a| a == "Bearer test-transip-token")
+            );
             return (204, "".to_string(), HashMap::new());
         }
         (404, "{}".to_string(), HashMap::new())
@@ -489,6 +633,14 @@ fn test_transip_remove_txt() {
     let transip = acmers::providers::find("transip").unwrap();
     let provider = (transip.create)(&env).unwrap();
 
-    let result = provider.remove_txt("example.com", "_acme-challenge.example.com", "test-challenge-value");
-    assert!(result.is_ok(), "TransIP remove_txt failed: {:?}", result.err());
+    let result = provider.remove_txt(
+        "example.com",
+        "_acme-challenge.example.com",
+        "test-challenge-value",
+    );
+    assert!(
+        result.is_ok(),
+        "TransIP remove_txt failed: {:?}",
+        result.err()
+    );
 }

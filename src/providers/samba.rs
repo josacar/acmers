@@ -11,7 +11,12 @@ impl DnsProvider for Samba {
     }
 
     fn env_vars() -> &'static [&'static str] {
-        &["SAMBA_HOSTNAME", "SAMBA_DOMAIN", "SAMBA_USERNAME", "SAMBA_PASSWORD"]
+        &[
+            "SAMBA_HOSTNAME",
+            "SAMBA_DOMAIN",
+            "SAMBA_USERNAME",
+            "SAMBA_PASSWORD",
+        ]
     }
 
     fn new(_env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
@@ -21,10 +26,14 @@ impl DnsProvider for Samba {
     }
 
     fn add_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Err(Error::Provider("samba provider requires samba-tool CLI".into()))
+        Err(Error::Provider(
+            "samba provider requires samba-tool CLI".into(),
+        ))
     }
 
     fn remove_txt(&self, _domain: &str, _name: &str, _value: &str) -> ProviderResult {
-        Err(Error::Provider("samba provider requires samba-tool CLI".into()))
+        Err(Error::Provider(
+            "samba provider requires samba-tool CLI".into(),
+        ))
     }
 }

@@ -25,10 +25,12 @@ impl DnsProvider for Ultra {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let username = env.get("ULTRA_USR")
+        let username = env
+            .get("ULTRA_USR")
             .ok_or_else(|| Error::Config("ULTRA_USR required".into()))?
             .clone();
-        let password = env.get("ULTRA_PWD")
+        let password = env
+            .get("ULTRA_PWD")
             .ok_or_else(|| Error::Config("ULTRA_PWD required".into()))?
             .clone();
         Ok(Box::new(Ultra { username, password }))
@@ -55,13 +57,21 @@ impl DnsProvider for Ultra {
             "ttl": 300,
             "rdata": [value],
         });
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json", headers)
-            .map_err(|e| Error::Provider(format!("ultra add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            headers,
+        )
+        .map_err(|e| Error::Provider(format!("ultra add TXT: {e}")))?;
         if resp.body.contains("Successful") || resp.body.contains("already exists") {
             return Ok(());
         }
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("ultra add TXT: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "ultra add TXT: {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -106,7 +116,12 @@ impl DnsProvider for Ultra {
             "ttl": 300,
             "rdata": [value],
         });
-        let _ = http::delete_with_body(&del_url, &serde_json::to_vec(&body).unwrap(), "application/json", headers);
+        let _ = http::delete_with_body(
+            &del_url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            headers,
+        );
         Ok(())
     }
 }
@@ -117,15 +132,27 @@ impl Ultra {
             "grant_type=password&username={}&password={}",
             self.username, self.password
         );
-        let resp = http::post(AUTH_URL, form.as_bytes(), "application/x-www-form-urlencoded", &[])
-            .map_err(|e| Error::Provider(format!("ultra auth: {e}")))?;
+        let resp = http::post(
+            AUTH_URL,
+            form.as_bytes(),
+            "application/x-www-form-urlencoded",
+            &[],
+        )
+        .map_err(|e| Error::Provider(format!("ultra auth: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("ultra auth: {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "ultra auth: {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("ultra auth parse: {e}")))?;
-        let token = j::get_string_required(&v, &["access_token"])
-            .map_err(|_| Error::Provider(format!("ultra auth: no access_token in response: {}", resp.body)))?;
+        let token = j::get_string_required(&v, &["access_token"]).map_err(|_| {
+            Error::Provider(format!(
+                "ultra auth: no access_token in response: {}",
+                resp.body
+            ))
+        })?;
         Ok(token.to_string())
     }
 
@@ -150,6 +177,8 @@ impl Ultra {
                 return Ok((zone_id, sub_domain));
             }
         }
-        Err(Error::Provider(format!("ultra: zone not found for {fulldomain}")))
+        Err(Error::Provider(format!(
+            "ultra: zone not found for {fulldomain}"
+        )))
     }
 }

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -23,10 +23,12 @@ impl DnsProvider for Rackcorp {
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
         Ok(Box::new(Rackcorp {
-            api_uuid: env.get("RACKCORP_APIUUID")
+            api_uuid: env
+                .get("RACKCORP_APIUUID")
                 .ok_or_else(|| Error::Config("RACKCORP_APIUUID required".into()))?
                 .clone(),
-            api_secret: env.get("RACKCORP_APISECRET")
+            api_secret: env
+                .get("RACKCORP_APISECRET")
                 .ok_or_else(|| Error::Config("RACKCORP_APISECRET required".into()))?
                 .clone(),
         }))
@@ -44,8 +46,13 @@ impl DnsProvider for Rackcorp {
             "data": value,
             "ttl": 300,
         });
-        let resp = http::post(API_ENDPOINT, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Accept", "application/json")])
-            .map_err(|e| Error::Provider(format!("Rackcorp add TXT: {e}")))?;
+        let resp = http::post(
+            API_ENDPOINT,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Accept", "application/json")],
+        )
+        .map_err(|e| Error::Provider(format!("Rackcorp add TXT: {e}")))?;
         Self::check_ok(&resp.body, "Rackcorp add TXT")
     }
 
@@ -63,7 +70,12 @@ impl DnsProvider for Rackcorp {
             "lookup": lookup,
             "data": value,
         });
-        match http::post(API_ENDPOINT, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Accept", "application/json")]) {
+        match http::post(
+            API_ENDPOINT,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Accept", "application/json")],
+        ) {
             Ok(resp) => {
                 if let Err(e) = Self::check_ok(&resp.body, "Rackcorp remove TXT") {
                     eprintln!("warning: cleanup failed: {e}");
@@ -90,14 +102,22 @@ impl Rackcorp {
                 body[k] = v.clone();
             }
         }
-        let resp = http::post(API_ENDPOINT, &serde_json::to_vec(&body).unwrap(), "application/json", &[("Accept", "application/json")])
-            .map_err(|e| Error::Provider(format!("Rackcorp API: {e}")))?;
+        let resp = http::post(
+            API_ENDPOINT,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Accept", "application/json")],
+        )
+        .map_err(|e| Error::Provider(format!("Rackcorp API: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Provider(format!("Rackcorp API JSON parse: {e}")))?;
         if v.get("code").and_then(|c| c.as_str()) == Some("OK") {
             Ok(v)
         } else {
-            Err(Error::Provider(format!("Rackcorp API error: {}", resp.body)))
+            Err(Error::Provider(format!(
+                "Rackcorp API error: {}",
+                resp.body
+            )))
         }
     }
 
@@ -123,7 +143,10 @@ impl Rackcorp {
         let parts: Vec<&str> = full.split('.').collect();
         for i in 0..parts.len() {
             let candidate = parts[i..].join(".");
-            let resp = match self.api_call("dns.domain.getall", &serde_json::json!({"exactName": candidate})) {
+            let resp = match self.api_call(
+                "dns.domain.getall",
+                &serde_json::json!({"exactName": candidate}),
+            ) {
                 Ok(v) => v,
                 Err(_) => continue,
             };
@@ -138,6 +161,8 @@ impl Rackcorp {
                 return Ok((candidate, lookup));
             }
         }
-        Err(Error::Provider(format!("Rackcorp: could not find zone for {full}")))
+        Err(Error::Provider(format!(
+            "Rackcorp: could not find zone for {full}"
+        )))
     }
 }

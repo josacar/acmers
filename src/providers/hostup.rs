@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::http;
@@ -12,11 +12,16 @@ pub struct Hostup {
 }
 
 impl DnsProvider for Hostup {
-    fn slug() -> &'static str { "hostup" }
-    fn env_vars() -> &'static [&'static str] { &["HOSTUP_API_KEY"] }
+    fn slug() -> &'static str {
+        "hostup"
+    }
+    fn env_vars() -> &'static [&'static str] {
+        &["HOSTUP_API_KEY"]
+    }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let api_key = env.get("HOSTUP_API_KEY")
+        let api_key = env
+            .get("HOSTUP_API_KEY")
             .ok_or_else(|| Error::Config("HOSTUP_API_KEY required".into()))?
             .clone();
         Ok(Box::new(Hostup { api_key }))
@@ -32,12 +37,16 @@ impl DnsProvider for Hostup {
             "type": "TXT",
             "value": value,
             "ttl": 60,
-        })).unwrap();
+        }))
+        .unwrap();
         let url = format!("{BASE_URL}/dns/zones/{zone_id}/records");
         let resp = http::post(&url, &body, "application/json", headers)
             .map_err(|e| Error::Provider(format!("hostup add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("hostup add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "hostup add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         Ok(())
     }
@@ -58,21 +67,25 @@ impl DnsProvider for Hostup {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let records = v.as_array()
+        let records = v
+            .as_array()
             .or_else(|| v.get("data").and_then(|d| d.as_array()));
         if let Some(records) = records {
             for record in records {
                 if record.get("type").and_then(|t| t.as_str()) == Some("TXT")
                     && record.get("name").and_then(|n| n.as_str()) == Some(name)
                     && record.get("value").and_then(|v| v.as_str()) == Some(value)
+                    && let Some(id) = record.get("id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
+                        }
+                    })
                 {
-                    if let Some(id) = record.get("id").and_then(|i| {
-                        if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                    }) {
-                        let del_url = format!("{BASE_URL}/dns/zones/{zone_id}/records/{id}");
-                        let _ = http::delete(&del_url, headers);
-                        return Ok(());
-                    }
+                    let del_url = format!("{BASE_URL}/dns/zones/{zone_id}/records/{id}");
+                    let _ = http::delete(&del_url, headers);
+                    return Ok(());
                 }
             }
         }
@@ -81,7 +94,7 @@ impl DnsProvider for Hostup {
 }
 
 impl Hostup {
-    fn record_name<'a>(&self, name: &'a str, zone_domain: &str) -> String {
+    fn record_name(&self, name: &str, zone_domain: &str) -> String {
         let suffix = format!(".{zone_domain}");
         let rel = name.strip_suffix(&suffix).unwrap_or(name);
         if rel.is_empty() || rel == "." {
@@ -91,26 +104,35 @@ impl Hostup {
         }
     }
 
-    fn resolve_zone(&self, domain: &str, headers: &[(&str, &str)]) -> Result<(String, String), Error> {
+    fn resolve_zone(
+        &self,
+        domain: &str,
+        headers: &[(&str, &str)],
+    ) -> Result<(String, String), Error> {
         let resp = http::get(&format!("{BASE_URL}/dns/zones"), headers)
             .map_err(|e| Error::Provider(format!("hostup list zones: {e}")))?;
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("hostup zones: {e}")))?;
-        let zones = v.as_array()
+        let zones = v
+            .as_array()
             .or_else(|| v.get("data").and_then(|d| d.as_array()));
-        let zones = zones.ok_or_else(|| Error::Provider("hostup zones: unexpected response".into()))?;
+        let zones =
+            zones.ok_or_else(|| Error::Provider("hostup zones: unexpected response".into()))?;
 
         let mut candidate = domain.to_string();
         loop {
             for zone in zones {
-                if let Some(zd) = zone.get("domain").and_then(|d| d.as_str()) {
-                    if candidate == zd || candidate.ends_with(&format!(".{zd}")) {
-                        if let Some(id) = zone.get("domain_id").and_then(|i| {
-                            if let Some(n) = i.as_i64() { Some(n.to_string()) } else { i.as_str().map(|s| s.to_string()) }
-                        }) {
-                            return Ok((id, zd.to_string()));
+                if let Some(zd) = zone.get("domain").and_then(|d| d.as_str())
+                    && (candidate == zd || candidate.ends_with(&format!(".{zd}")))
+                    && let Some(id) = zone.get("domain_id").and_then(|i| {
+                        if let Some(n) = i.as_i64() {
+                            Some(n.to_string())
+                        } else {
+                            i.as_str().map(|s| s.to_string())
                         }
-                    }
+                    })
+                {
+                    return Ok((id, zd.to_string()));
                 }
             }
             if let Some(pos) = candidate.find('.') {
@@ -119,6 +141,8 @@ impl Hostup {
                 break;
             }
         }
-        Err(Error::Provider(format!("hostup: zone not found for {domain}")))
+        Err(Error::Provider(format!(
+            "hostup: zone not found for {domain}"
+        )))
     }
 }

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 use crate::base64;
 use crate::error::Error;
@@ -23,10 +23,12 @@ impl DnsProvider for La {
     }
 
     fn new(env: &HashMap<String, String>) -> Result<Box<dyn DnsProvider>, Error> {
-        let id = env.get("LA_Id")
+        let id = env
+            .get("LA_Id")
             .ok_or_else(|| Error::Config("LA_Id required".into()))?
             .clone();
-        let sk = env.get("LA_Sk")
+        let sk = env
+            .get("LA_Sk")
             .ok_or_else(|| Error::Config("LA_Sk required".into()))?
             .clone();
         Ok(Box::new(La { id, sk }))
@@ -44,15 +46,25 @@ impl DnsProvider for La {
             "ttl": 600,
         });
         let url = format!("{BASE_URL}/record");
-        let resp = http::post(&url, &serde_json::to_vec(&body).unwrap(), "application/json",
-            &[("Authorization", &auth)])
-            .map_err(|e| Error::Provider(format!("la add TXT: {e}")))?;
+        let resp = http::post(
+            &url,
+            &serde_json::to_vec(&body).unwrap(),
+            "application/json",
+            &[("Authorization", &auth)],
+        )
+        .map_err(|e| Error::Provider(format!("la add TXT: {e}")))?;
         if resp.status >= 400 {
-            return Err(Error::Provider(format!("la add TXT: HTTP {} {}", resp.status, resp.body)));
+            return Err(Error::Provider(format!(
+                "la add TXT: HTTP {} {}",
+                resp.status, resp.body
+            )));
         }
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Provider(format!("la add TXT parse: {e}")))?;
-        if v.get("id").is_some() || v.get("msg").and_then(|m| m.as_str()) == Some("\u{4e0e}\u{5df2}\u{6709}\u{8bb0}\u{5f55}\u{51b2}\u{7a81}") {
+        if v.get("id").is_some()
+            || v.get("msg").and_then(|m| m.as_str())
+                == Some("\u{4e0e}\u{5df2}\u{6709}\u{8bb0}\u{5f55}\u{51b2}\u{7a81}")
+        {
             return Ok(());
         }
         if v.get("code").and_then(|c| c.as_u64()) == Some(200) {
@@ -65,8 +77,10 @@ impl DnsProvider for La {
         let auth = auth_header(&self.id, &self.sk);
         let (domain_id, sub_domain) = self.resolve_root(domain, name)?;
 
-        let url = format!("{BASE_URL}/recordList?pageIndex=1&pageSize=10&domainId={}&host={}&type=16&data={}",
-            domain_id, sub_domain, value);
+        let url = format!(
+            "{BASE_URL}/recordList?pageIndex=1&pageSize=10&domainId={}&host={}&type=16&data={}",
+            domain_id, sub_domain, value
+        );
         let resp = match http::get(&url, &[("Authorization", &auth)]) {
             Ok(r) => r,
             Err(_) => return Ok(()),
@@ -75,16 +89,25 @@ impl DnsProvider for La {
             Ok(v) => v,
             Err(_) => return Ok(()),
         };
-        let record_id = v.get("id").and_then(|i| i.as_str()).map(|s| s.to_string())
+        let record_id = v
+            .get("id")
+            .and_then(|i| i.as_str())
+            .map(|s| s.to_string())
             .or_else(|| {
-                v.get("data").and_then(|d| d.as_array())
+                v.get("data")
+                    .and_then(|d| d.as_array())
                     .and_then(|arr| arr.first())
                     .and_then(|r| r.get("id"))
                     .and_then(|i| {
-                        if i.is_string() { i.as_str().map(|s| s.to_string()) }
-                        else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-                        else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-                        else { None }
+                        if i.is_string() {
+                            i.as_str().map(|s| s.to_string())
+                        } else if i.is_u64() {
+                            i.as_u64().map(|n| n.to_string())
+                        } else if i.is_i64() {
+                            i.as_i64().map(|n| n.to_string())
+                        } else {
+                            None
+                        }
                     })
             });
         let record_id = match record_id {
@@ -110,16 +133,21 @@ impl La {
                 .map_err(|e| Error::Provider(format!("la zone resolution: {e}")))?;
             let v: Value = serde_json::from_str(&resp.body)
                 .map_err(|e| Error::Provider(format!("la zone parse: {e}")))?;
-            if v.get("domain").is_some() {
-                if let Some(id) = v.get("id").and_then(|i| {
-                    if i.is_string() { i.as_str().map(|s| s.to_string()) }
-                    else if i.is_u64() { i.as_u64().map(|n| n.to_string()) }
-                    else if i.is_i64() { i.as_i64().map(|n| n.to_string()) }
-                    else { None }
-                }) {
-                    let sub_domain = parts[..i].join(".");
-                    return Ok((id, sub_domain));
-                }
+            if v.get("domain").is_some()
+                && let Some(id) = v.get("id").and_then(|i| {
+                    if i.is_string() {
+                        i.as_str().map(|s| s.to_string())
+                    } else if i.is_u64() {
+                        i.as_u64().map(|n| n.to_string())
+                    } else if i.is_i64() {
+                        i.as_i64().map(|n| n.to_string())
+                    } else {
+                        None
+                    }
+                })
+            {
+                let sub_domain = parts[..i].join(".");
+                return Ok((id, sub_domain));
             }
         }
         Err(Error::Provider("la: could not resolve root domain".into()))
