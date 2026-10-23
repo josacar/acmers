@@ -13,14 +13,17 @@ ported from the acme.sh project.
 Single binary, zero runtime dependencies beyond glibc.
 .SH COMMANDS
 .TP
-\fBregister\fR \-\-email \fIaddr\fR [\-\-server \fIurl\fR] [\-\-test]
-Register an ACME account. Use \fB--test\fR for staging. Accounts are stored
-per ACME server.
+\fBregister\fR \-\-email \fIaddr\fR [\-\-ca \fIname\fR] [\-\-server \fIurl\fR] [\-\-test] [\-\-eab\-kid \fIid\fR \-\-eab\-hmac\-key \fIkey\fR]
+Register an ACME account. Use \fB--ca\fR to select a CA preset and
+\fB--test\fR for Let's Encrypt staging. Accounts are stored per ACME server.
+EAB credentials are only needed for the first registration at a CA that
+requires them.
 .TP
 \fBissue\fR \-d \fIdomain\fR... \-\-dns \fIprovider\fR \-\-email \fIaddr\fR [options]
 Issue a certificate for one or more domains using the DNS-01 challenge.
 The \fB--dns\fR flag selects the DNS provider (see \fBlist-providers\fR).
-Use \fB--test\fR for staging and \fB--server\fR for a non-default directory URL.
+Use \fB--ca\fR for a CA preset, \fB--test\fR for staging, and \fB--server\fR for
+a non-default directory URL.
 .TP
 \fBrenew\fR [\-d \fIdomain\fR] [\-\-all] [\-\-force] [\-\-dry-run] [\-\-days \fIn\fR]
 Renew one certificate, or every stored certificate when no domain is given.
@@ -80,6 +83,34 @@ environment. For example:
 \fB\-\-dnssleep\fR \fIseconds\fR
 Fixed wait before challenge validation, used as a fallback when propagation
 polling is unavailable.
+.SH CA SELECTION AND EAB
+.TP
+\fB\-\-ca\fR \fIname\fR
+Select a built-in CA preset: \fBletsencrypt\fR, \fBletsencrypt\-staging\fR,
+\fBzerossl\fR, \fBgoogle\fR, \fBsslcom\fR, \fBsslcom\-rsa\fR, \fBbuypass\fR,
+\fBbuypass\-test\fR, or \fBsectigo\fR. The default is Let's Encrypt production.
+\fB--server\fR overrides the preset directory URL while keeping the preset's EAB
+requirement, and a known CA directory passed via \fB--server\fR infers the EAB
+requirement. \fB--test\fR selects Let's Encrypt staging and conflicts with a
+non-Let's Encrypt preset.
+.TP
+\fB\-\-eab\-kid\fR \fIid\fR, \fB\-\-eab\-hmac\-key\fR \fIkey\fR
+External Account Binding credentials for account registration. ZeroSSL, Google
+Trust Services, SSL.com, and Sectigo require EAB; Let's Encrypt and Buypass do
+not. The values may instead come from \fBACME_EAB_KID\fR and
+\fBACME_EAB_HMAC_KEY\fR. EAB is only needed when an account is first created:
+renewals with an existing account do not need it, and the secrets are never
+stored on disk.
+.PP
+Buypass discontinued TLS/SSL certificate issuance in October 2025. Its presets
+remain for existing accounts and test endpoints but cannot issue new
+certificates; Buypass also issued RSA-only certificates, which acmers does not
+support yet.
+.PP
+.nf
+  acmers register --email you@example.com --ca zerossl \\
+    --eab-kid kid-from-ca --eab-hmac-key hmac-key-from-ca
+.fi
 .SH DNS PROVIDERS
 acmers supports 200+ DNS providers. Each provider requires specific
 environment variables for authentication. Run \fBacmers list-providers\fR
@@ -119,8 +150,10 @@ packaged service loads it automatically, and the cron fallback passes it with
 Twice-daily renewal timer, enabled on package installation. The packaged
 timer uses a 12-hour randomized delay and \fBPersistent=true\fR.
 .SH ENVIRONMENT
-All DNS provider credentials are passed via environment variables.
-No credentials are stored on disk beyond the ACME account key.
+All DNS provider credentials are passed via environment variables, or loaded from
+\fI/etc/acmers/env\fR by the packaged service and with \fB--env-file\fR.
+\fBACME_EAB_KID\fR and \fBACME_EAB_HMAC_KEY\fR provide External Account Binding
+credentials when \fB--eab\-kid\fR and \fB--eab\-hmac\-key\fR are not given.
 .SH EXIT STATUS
 .TP
 0

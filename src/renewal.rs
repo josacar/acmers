@@ -9,6 +9,7 @@ pub struct RenewalConfig {
     pub provider: String,
     pub email: String,
     pub server: String,
+    pub ca: Option<String>,
     pub staging: bool,
     pub challenge: String,
     pub key_type: String,
@@ -33,6 +34,7 @@ impl RenewalConfig {
             provider,
             email,
             server,
+            ca: None,
             staging: false,
             challenge: "dns-01".to_string(),
             key_type: "ecdsa-p256".to_string(),
@@ -73,6 +75,7 @@ impl RenewalConfig {
             provider: string(v, "provider"),
             email: string(v, "email"),
             server: string(v, "server"),
+            ca: optional_string(v, "ca"),
             staging: boolean(v, "staging")
                 .or_else(|| boolean(v, "test"))
                 .unwrap_or(false),
@@ -99,6 +102,7 @@ impl RenewalConfig {
             "provider": self.provider,
             "email": self.email,
             "server": self.server,
+            "ca": self.ca,
             "staging": self.staging,
             "challenge": self.challenge,
             "key_type": self.key_type,

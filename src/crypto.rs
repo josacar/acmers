@@ -106,6 +106,45 @@ pub enum KidOrJwk {
     Jwk(Value),
 }
 
+pub fn decode_eab_key(encoded: &str) -> Result<Vec<u8>, Error> {
+    let trimmed = encoded.trim();
+    if trimmed.is_empty() {
+        return Err(Error::Config("EAB HMAC key is empty".into()));
+    }
+    let decoded = crate::base64::decode(trimmed)
+        .or_else(|_| crate::base64::decode_std(trimmed))
+        .map_err(|_| {
+            Error::Config("EAB HMAC key is not valid base64url or standard base64".into())
+        })?;
+    if decoded.is_empty() {
+        return Err(Error::Config("EAB HMAC key is empty".into()));
+    }
+    Ok(decoded)
+}
+
+pub fn eab_jws(jwk: &Value, kid: &str, hmac_key: &str, url: &str) -> Result<Value, Error> {
+    let key_bytes = decode_eab_key(hmac_key)?;
+
+    let protected = json!({"alg": "HS256", "kid": kid, "url": url});
+    let protected_str = serde_json::to_string(&protected)
+        .map_err(|e| Error::Crypto(format!("serialize EAB protected header: {e}")))?;
+    let payload_str = serde_json::to_string(jwk)
+        .map_err(|e| Error::Crypto(format!("serialize EAB payload: {e}")))?;
+
+    let protected_b64 = crate::base64::encode_no_pad(protected_str.as_bytes());
+    let payload_b64 = crate::base64::encode_no_pad(payload_str.as_bytes());
+    let signing_input = format!("{protected_b64}.{payload_b64}");
+
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, &key_bytes);
+    let signature = ring::hmac::sign(&key, signing_input.as_bytes());
+
+    Ok(json!({
+        "protected": protected_b64,
+        "payload": payload_b64,
+        "signature": crate::base64::encode_no_pad(signature.as_ref()),
+    }))
+}
+
 pub fn pkcs8_to_pem(der: &[u8]) -> String {
     let encoded = crate::base64::encode_std(der);
     let mut out = String::with_capacity(encoded.len() + 64);
@@ -136,4 +175,89 @@ pub fn create_csr(domains: &[String], key_pkcs8: &[u8]) -> Result<Vec<u8>, Error
         .serialize_request(&key)
         .map_err(|e| Error::Crypto(format!("CSR creation: {e}")))?;
     Ok(csr.der().to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const KEY: &[u8] = b"super-secret-eab-key";
+    const KID: &str = "kid-1";
+    const URL: &str = "https://ca.example/new-account";
+
+    fn jwk() -> Value {
+        json!({"crv": "P-256", "kty": "EC", "x": "abc", "y": "def"})
+    }
+
+    fn key_b64url() -> String {
+        crate::base64::encode_no_pad(KEY)
+    }
+
+    #[test]
+    fn eab_jws_has_expected_header_and_payload() {
+        let eab = eab_jws(&jwk(), KID, &key_b64url(), URL).unwrap();
+
+        let protected: Value = serde_json::from_slice(
+            &crate::base64::decode(eab["protected"].as_str().unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(protected["alg"], "HS256");
+        assert_eq!(protected["kid"], KID);
+        assert_eq!(protected["url"], URL);
+
+        let payload: Value = serde_json::from_slice(
+            &crate::base64::decode(eab["payload"].as_str().unwrap()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(payload, jwk());
+        assert!(eab["signature"].as_str().is_some());
+    }
+
+    #[test]
+    fn eab_jws_signature_verifies_with_known_key() {
+        let eab = eab_jws(&jwk(), KID, &key_b64url(), URL).unwrap();
+        let signing_input = format!(
+            "{}.{}",
+            eab["protected"].as_str().unwrap(),
+            eab["payload"].as_str().unwrap()
+        );
+        let signature = crate::base64::decode(eab["signature"].as_str().unwrap()).unwrap();
+        let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, KEY);
+        ring::hmac::verify(&key, signing_input.as_bytes(), &signature).unwrap();
+    }
+
+    #[test]
+    fn eab_jws_matches_known_signature_vector() {
+        let eab = eab_jws(&jwk(), KID, &key_b64url(), URL).unwrap();
+        assert_eq!(
+            eab["signature"].as_str().unwrap(),
+            "G5NMV6cRCSbVTdoRnio9MN2P9zNsYhQVdCDXy3r93Uw"
+        );
+    }
+
+    #[test]
+    fn eab_key_accepts_base64url_and_standard_base64() {
+        let url_safe = crate::base64::encode_no_pad(KEY);
+        assert_eq!(decode_eab_key(&url_safe).unwrap(), KEY);
+
+        let standard = crate::base64::encode_std(KEY);
+        assert_eq!(decode_eab_key(&standard).unwrap(), KEY);
+
+        let padded_standard = crate::base64::encode_std(&[0xfb, 0xff, 0xbf]);
+        assert!(padded_standard.contains('+') || padded_standard.contains('/'));
+        assert_eq!(
+            decode_eab_key(&padded_standard).unwrap(),
+            vec![0xfb, 0xff, 0xbf]
+        );
+    }
+
+    #[test]
+    fn eab_key_errors_do_not_leak_the_key() {
+        let bad = "not valid base64 !!!";
+        let err = decode_eab_key(bad).unwrap_err().to_string();
+        assert!(!err.contains(bad));
+
+        let empty = decode_eab_key("   ").unwrap_err().to_string();
+        assert!(empty.contains("empty"));
+    }
 }

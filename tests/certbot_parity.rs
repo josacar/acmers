@@ -100,6 +100,7 @@ fn legacy_renewal_defaults_domains() {
     assert_eq!(rc.key_type, "ecdsa-p256");
     assert_eq!(rc.dnssleep, 10);
     assert_eq!(rc.dns_timeout, 120);
+    assert!(rc.ca.is_none());
 }
 
 #[test]
@@ -116,6 +117,7 @@ fn renewal_round_trip_preserves_sans_and_hooks() {
         PRODUCTION.to_string(),
     );
     rc.staging = true;
+    rc.ca = Some("zerossl".to_string());
     rc.dnssleep = 30;
     rc.dns_timeout = 90;
     rc.dns_servers = vec!["1.1.1.1".to_string()];
@@ -127,6 +129,7 @@ fn renewal_round_trip_preserves_sans_and_hooks() {
     let loaded = RenewalConfig::load(&config, "example.com").unwrap();
     assert_eq!(loaded.domains, rc.domains);
     assert!(loaded.staging);
+    assert_eq!(loaded.ca.as_deref(), Some("zerossl"));
     assert_eq!(loaded.dnssleep, 30);
     assert_eq!(loaded.dns_timeout, 90);
     assert_eq!(loaded.dns_servers, vec!["1.1.1.1"]);
@@ -155,6 +158,58 @@ fn account_slugs_are_distinct() {
     let staging = config::server_slug(STAGING);
     assert_ne!(prod, staging);
     assert!(prod.contains("acme-v02.api.letsencrypt.org"));
+}
+
+#[test]
+fn eab_required_without_credentials_fails_before_network() {
+    let config = test_config("eab-missing");
+    let err = account::load_or_register(
+        &config,
+        "user@example.com",
+        "https://acme.zerossl.com/v2/DV90",
+        None,
+        true,
+    )
+    .err()
+    .expect("EAB-required CA must reject missing credentials");
+    assert!(
+        err.to_string()
+            .contains("External Account Binding is required")
+    );
+}
+
+#[test]
+fn existing_account_is_used_without_eab() {
+    let config = test_config("eab-existing");
+    let server = "https://acme.zerossl.com/v2/DV90";
+    let body = serde_json::json!({
+        "url": "https://acme.zerossl.com/v2/DV90/account/1",
+        "key": acmers::base64::encode_no_pad(&[1, 2, 3]),
+        "jwk_thumbprint": "thumb",
+        "server": server,
+        "email": "user@example.com",
+    });
+    config::write_atomic(
+        &config.account_file_for(server),
+        body.to_string().as_bytes(),
+        0o600,
+    )
+    .unwrap();
+
+    let account =
+        account::load_or_register(&config, "user@example.com", server, None, true).unwrap();
+    assert_eq!(account.url, "https://acme.zerossl.com/v2/DV90/account/1");
+}
+
+#[test]
+fn eab_credentials_require_both_parts() {
+    let eab = account::EabCredentials::from_options(Some("kid"), Some("key"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(eab.kid, "kid");
+    assert_eq!(eab.hmac_key, "key");
+    assert!(account::EabCredentials::from_options(None, Some("key")).is_err());
+    assert!(account::EabCredentials::from_options(Some("kid"), None).is_err());
 }
 
 #[test]

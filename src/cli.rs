@@ -18,6 +18,9 @@ pub struct IssueArgs {
     pub provider: String,
     pub email: Option<String>,
     pub server: Option<String>,
+    pub ca: Option<String>,
+    pub eab_kid: Option<String>,
+    pub eab_hmac_key: Option<String>,
     pub test: bool,
     pub standalone: bool,
     pub dnssleep: u64,
@@ -57,6 +60,9 @@ pub enum Cmd {
     Register {
         email: String,
         server: Option<String>,
+        ca: Option<String>,
+        eab_kid: Option<String>,
+        eab_hmac_key: Option<String>,
         test: bool,
     },
     Cron,
@@ -150,6 +156,9 @@ fn parse_issue(args: &[String]) -> Result<Cmd, String> {
     let mut provider = String::new();
     let mut email = None;
     let mut server = None;
+    let mut ca = None;
+    let mut eab_kid = None;
+    let mut eab_hmac_key = None;
     let mut test = false;
     let mut standalone = false;
     let mut dnssleep = 10u64;
@@ -171,6 +180,9 @@ fn parse_issue(args: &[String]) -> Result<Cmd, String> {
             "--dns" => provider = next_value(args, &mut i, "--dns")?,
             "--email" | "-m" => email = Some(next_value(args, &mut i, "--email")?),
             "--server" => server = Some(next_value(args, &mut i, "--server")?),
+            "--ca" => ca = Some(next_value(args, &mut i, "--ca")?),
+            "--eab-kid" => eab_kid = Some(next_value(args, &mut i, "--eab-kid")?),
+            "--eab-hmac-key" => eab_hmac_key = Some(next_value(args, &mut i, "--eab-hmac-key")?),
             "--test" | "--staging" => test = true,
             "--dnssleep" => {
                 dnssleep = next_value(args, &mut i, "--dnssleep")?
@@ -220,6 +232,9 @@ fn parse_issue(args: &[String]) -> Result<Cmd, String> {
         provider,
         email,
         server,
+        ca,
+        eab_kid,
+        eab_hmac_key,
         test,
         standalone,
         dnssleep,
@@ -314,12 +329,18 @@ fn parse_revoke(args: &[String]) -> Result<Cmd, String> {
 fn parse_register(args: &[String]) -> Result<Cmd, String> {
     let mut email = None;
     let mut server = None;
+    let mut ca = None;
+    let mut eab_kid = None;
+    let mut eab_hmac_key = None;
     let mut test = false;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--email" | "-m" => email = Some(next_value(args, &mut i, "--email")?),
             "--server" => server = Some(next_value(args, &mut i, "--server")?),
+            "--ca" => ca = Some(next_value(args, &mut i, "--ca")?),
+            "--eab-kid" => eab_kid = Some(next_value(args, &mut i, "--eab-kid")?),
+            "--eab-hmac-key" => eab_hmac_key = Some(next_value(args, &mut i, "--eab-hmac-key")?),
             "--test" | "--staging" => test = true,
             _ => return Err(format!("unknown option: {}", args[i])),
         }
@@ -328,6 +349,9 @@ fn parse_register(args: &[String]) -> Result<Cmd, String> {
     Ok(Cmd::Register {
         email: email.ok_or("--email required")?,
         server,
+        ca,
+        eab_kid,
+        eab_hmac_key,
         test,
     })
 }
@@ -375,4 +399,107 @@ fn parse_delete(args: &[String]) -> Result<Cmd, String> {
     Ok(Cmd::Delete {
         domain: domain.ok_or("--domain required")?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn issue_parses_ca_and_eab_flags() {
+        let cmd = parse(&args(&[
+            "issue",
+            "-d",
+            "example.com",
+            "--dns",
+            "cf",
+            "--ca",
+            "zerossl",
+            "--eab-kid",
+            "kid-1",
+            "--eab-hmac-key",
+            "secret-key",
+        ]))
+        .unwrap();
+        match cmd {
+            Cmd::Issue(issue) => {
+                assert_eq!(issue.ca.as_deref(), Some("zerossl"));
+                assert_eq!(issue.eab_kid.as_deref(), Some("kid-1"));
+                assert_eq!(issue.eab_hmac_key.as_deref(), Some("secret-key"));
+            }
+            _ => panic!("expected issue command"),
+        }
+    }
+
+    #[test]
+    fn issue_ca_and_eab_flags_are_optional() {
+        let cmd = parse(&args(&["issue", "-d", "example.com", "--dns", "cf"])).unwrap();
+        match cmd {
+            Cmd::Issue(issue) => {
+                assert!(issue.ca.is_none());
+                assert!(issue.eab_kid.is_none());
+                assert!(issue.eab_hmac_key.is_none());
+            }
+            _ => panic!("expected issue command"),
+        }
+    }
+
+    #[test]
+    fn register_parses_ca_and_eab_flags() {
+        let cmd = parse(&args(&[
+            "register",
+            "--email",
+            "user@example.com",
+            "--ca",
+            "google",
+            "--eab-kid",
+            "kid-2",
+            "--eab-hmac-key",
+            "key-2",
+        ]))
+        .unwrap();
+        match cmd {
+            Cmd::Register {
+                ca,
+                eab_kid,
+                eab_hmac_key,
+                server,
+                test,
+                ..
+            } => {
+                assert_eq!(ca.as_deref(), Some("google"));
+                assert_eq!(eab_kid.as_deref(), Some("kid-2"));
+                assert_eq!(eab_hmac_key.as_deref(), Some("key-2"));
+                assert!(server.is_none());
+                assert!(!test);
+            }
+            _ => panic!("expected register command"),
+        }
+    }
+
+    #[test]
+    fn register_parses_server_and_test_with_ca() {
+        let cmd = parse(&args(&[
+            "register",
+            "--email",
+            "user@example.com",
+            "--ca",
+            "letsencrypt",
+            "--server",
+            "https://acme.example/directory",
+            "--test",
+        ]))
+        .unwrap();
+        match cmd {
+            Cmd::Register { server, test, .. } => {
+                assert_eq!(server.as_deref(), Some("https://acme.example/directory"));
+                assert!(test);
+            }
+            _ => panic!("expected register command"),
+        }
+    }
 }

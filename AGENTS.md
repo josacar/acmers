@@ -250,7 +250,7 @@ let token = j::get_string_required(&v, &["token"])?.to_string();
 # Build
 cargo build
 
-# Run all tests (109 tests as of 0.3.0)
+# Run all tests (135 tests as of 0.3.0)
 cargo test
 
 # Focused integration tests
@@ -308,6 +308,7 @@ A stub provider file:
 | `src/main.rs` | CLI dispatch, issue/renew/revoke, lifecycle commands |
 | `src/cli.rs` | Argument parser |
 | `src/crypto.rs` | Key generation, JWS signing, CSR, PEM encoding |
+| `src/ca.rs` | Built-in CA presets and EAB requirement resolution |
 | `src/http.rs` | HTTP client (ureq wrapper) |
 | `src/json.rs` | JSON field extraction helpers |
 | `src/base64.rs` | Base64url encode/decode |

@@ -1,5 +1,6 @@
 pub mod acme;
 pub mod base64;
+pub mod ca;
 pub mod cli;
 pub mod config;
 pub mod crypto;

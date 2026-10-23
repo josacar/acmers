@@ -175,13 +175,38 @@ sudo chmod -R go-rwx /var/lib/acmers
 sudo systemctl start acmers.service
 ```
 
+## Other CAs (EAB)
+
+The Cloudflare walkthrough above works with any CA preset. Some CAs require
+External Account Binding (EAB): supply the key identifier and HMAC key from the
+CA dashboard on the first registration. ZeroSSL example:
+
+```sh
+sudo acmers register --email admin@example.com --ca zerossl \
+  --eab-kid 'kid-from-zerossl' \
+  --eab-hmac-key 'hmac-key-from-zerossl'
+```
+
+`ACME_EAB_KID` and `ACME_EAB_HMAC_KEY` can be used instead of the flags to keep
+secrets out of shell history. EAB is only needed when the account is created:
+renewals reuse the stored account and need neither. EAB secrets are never
+written to disk.
+
+The full preset list is in the README. `--server URL` still accepts an
+arbitrary directory and overrides the preset URL, and the selected CA is stored
+in `renewal.json` so `acmers show -d example.com` reports it.
+
 ## Caveats
 
 - acmers issues ECDSA P-256 certificates. If a service requires RSA, it is not
   supported yet.
-- acmers is DNS-01 only; there is no nginx/apache/webroot plugin.
-- CAs requiring External Account Binding (ZeroSSL, Google Public CA, SSL.com)
-  are not supported yet.
+- acmers does not implement certbot's nginx/apache/webroot plugins. DNS-01 and
+  standalone HTTP-01 are available.
+- CAs requiring External Account Binding (ZeroSSL, Google Trust Services,
+  SSL.com, Sectigo) are supported; pass `--eab-kid` and `--eab-hmac-key` once
+  during registration.
+- Buypass discontinued TLS/SSL issuance in October 2025; its presets remain for
+  existing accounts/test endpoints but cannot issue new certificates.
 - certbot's ACME account and `/etc/letsencrypt` state are not imported.
 - Cloudflare's certbot token works unchanged; only the variable name differs
   (`dns_cloudflare_api_token` → `CF_Token`).

@@ -1,7 +1,7 @@
 mod mock;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use mock::MockServer;
 
@@ -137,9 +137,14 @@ fn mock_acme_issuance_writes_file_set() {
         server: "https://mock.test/directory".to_string(),
     };
 
-    let account =
-        acme::account::load_or_register(&config, "user@example.com", "https://mock.test/directory")
-            .unwrap();
+    let account = acme::account::load_or_register(
+        &config,
+        "user@example.com",
+        "https://mock.test/directory",
+        None,
+        false,
+    )
+    .unwrap();
     assert_eq!(account.url, "https://mock.test/account/1");
 
     let account_key =
@@ -215,6 +220,105 @@ fn mock_acme_issuance_writes_file_set() {
             .unwrap()
             .starts_with("-----BEGIN PRIVATE KEY-----")
     );
+
+    http::clear_test_base();
+}
+
+#[test]
+fn mock_registration_includes_external_account_binding() {
+    const EAB_KEY: &[u8] = b"mock-eab-hmac-key";
+    const EAB_KID: &str = "eab-kid-1";
+
+    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    let capture = Arc::clone(&captured);
+
+    let handler: MockHandler = Arc::new(move |method, path, body, _headers| match (method, path) {
+        ("GET", "/directory") => (
+            200,
+            json(serde_json::json!({
+                "newNonce": "https://mock.test/new-nonce",
+                "newAccount": "https://mock.test/new-account",
+                "newOrder": "https://mock.test/new-order",
+                "revokeCert": "https://mock.test/revoke",
+                "keyChange": "https://mock.test/key-change"
+            })),
+            HashMap::new(),
+        ),
+        ("HEAD", "/new-nonce") => (200, String::new(), headers(&[("Replay-Nonce", "nonce-1")])),
+        ("POST", "/new-account") => {
+            let parsed = serde_json::from_slice(body).unwrap_or(serde_json::Value::Null);
+            *capture.lock().unwrap() = Some(parsed);
+            (
+                201,
+                json(serde_json::json!({"status": "valid"})),
+                headers(&[("Location", "https://mock.test/account/1")]),
+            )
+        }
+        _ => (
+            404,
+            json(serde_json::json!({"detail": format!("unhandled {method} {path}")})),
+            HashMap::new(),
+        ),
+    });
+
+    let server = MockServer::new(handler);
+    http::set_test_base(&server.url());
+
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let home = std::env::temp_dir().join(format!("acmers-eab-mock-{}-{nanos}", std::process::id()));
+    let config = Config {
+        home,
+        server: "https://mock.test/directory".to_string(),
+    };
+
+    let eab = acme::account::EabCredentials {
+        kid: EAB_KID.to_string(),
+        hmac_key: acmers::base64::encode_no_pad(EAB_KEY),
+    };
+
+    let account = acme::account::load_or_register(
+        &config,
+        "user@example.com",
+        "https://mock.test/directory",
+        Some(&eab),
+        true,
+    )
+    .unwrap();
+    assert_eq!(account.url, "https://mock.test/account/1");
+
+    let request = captured.lock().unwrap().take().unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(
+        &acmers::base64::decode(request["payload"].as_str().unwrap()).unwrap(),
+    )
+    .unwrap();
+
+    let eab_object = payload
+        .get("externalAccountBinding")
+        .expect("new-account payload must contain externalAccountBinding");
+    let protected: serde_json::Value = serde_json::from_slice(
+        &acmers::base64::decode(eab_object["protected"].as_str().unwrap()).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(protected["alg"], "HS256");
+    assert_eq!(protected["kid"], EAB_KID);
+    assert_eq!(protected["url"], "https://mock.test/new-account");
+
+    let signing_input = format!(
+        "{}.{}",
+        eab_object["protected"].as_str().unwrap(),
+        eab_object["payload"].as_str().unwrap()
+    );
+    let signature = acmers::base64::decode(eab_object["signature"].as_str().unwrap()).unwrap();
+    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, EAB_KEY);
+    ring::hmac::verify(&key, signing_input.as_bytes(), &signature).unwrap();
+
+    let account_file =
+        std::fs::read_to_string(config.account_file_for("https://mock.test/directory")).unwrap();
+    assert!(!account_file.contains(EAB_KID));
+    assert!(!account_file.contains(&eab.hmac_key));
 
     http::clear_test_base();
 }

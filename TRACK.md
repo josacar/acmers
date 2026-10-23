@@ -21,6 +21,9 @@ reload hooks.
 - SAN-preserving bulk renewal with `--force`, `--dry-run`, `--days`, and
   `--keep-until-expiring`.
 - Per-server ACME accounts with staging isolation.
+- CA presets for Let's Encrypt, ZeroSSL, Google Trust Services, SSL.com,
+  Buypass, and Sectigo, with External Account Binding for the CAs that require
+  it.
 - Cloudflare DNS-01 migration from certbot documented in
   [docs/MIGRATION.md](docs/MIGRATION.md).
 - Install paths, reload/deploy/pre/post hooks, and persisted renewal settings.
@@ -146,7 +149,9 @@ Commands:
 
 Examples:
   acmers register --email user@example.com
+  acmers register --email user@example.com --ca zerossl --eab-kid ... --eab-hmac-key ...
   acmers issue -d example.com -d '*.example.com' --dns cf --email user@example.com
+  acmers issue -d example.com --dns cf --email user@example.com --ca google --eab-kid ... --eab-hmac-key ...
   acmers renew -d example.com
   acmers renew --all --dry-run --env-file /etc/acmers/env
   acmers revoke -d example.com --reason keycompromise
@@ -165,6 +170,8 @@ Issue/renew deployment flags: `--cert-path`, `--key-path`, `--fullchain-path`,
 - [x] Certbot-compatible certificate and key files.
 - [x] SAN-preserving renewal, bulk renewal, dry runs, and ARI.
 - [x] Per-server accounts and staging isolation.
+- [x] CA presets and External Account Binding for ZeroSSL, Google, SSL.com,
+  and Sectigo.
 - [x] Install paths, reload/deploy/pre/post hooks.
 - [x] DNS propagation polling and Cloudflare migration guide.
 - [x] Certificate management and revocation reasons.
@@ -176,7 +183,6 @@ Issue/renew deployment flags: `--cert-path`, `--key-path`, `--fullchain-path`,
 - Webroot, nginx, and apache plugins.
 - TLS-ALPN-01.
 - RSA and P-384 certificate keys.
-- External Account Binding (ZeroSSL, Google Public CA, SSL.com).
 - Importing certbot's ACME account or `/etc/letsencrypt` state.
 - Notifications (email/webhook) and log rotation.
 - User-level systemd timers.

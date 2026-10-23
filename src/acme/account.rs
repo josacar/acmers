@@ -14,7 +14,48 @@ pub struct Account {
     pub email: String,
 }
 
-pub fn load_or_register(config: &Config, email: &str, server: &str) -> Result<Account, Error> {
+#[derive(Clone)]
+pub struct EabCredentials {
+    pub kid: String,
+    pub hmac_key: String,
+}
+
+impl EabCredentials {
+    pub fn from_options(kid: Option<&str>, hmac_key: Option<&str>) -> Result<Option<Self>, Error> {
+        let kid = resolve_option(kid, "ACME_EAB_KID");
+        let hmac_key = resolve_option(hmac_key, "ACME_EAB_HMAC_KEY");
+        match (kid, hmac_key) {
+            (None, None) => Ok(None),
+            (Some(kid), Some(hmac_key)) => Ok(Some(EabCredentials { kid, hmac_key })),
+            (None, Some(_)) => Err(Error::Config(
+                "an EAB key identifier is required (use --eab-kid or ACME_EAB_KID)".into(),
+            )),
+            (Some(_), None) => Err(Error::Config(
+                "an EAB HMAC key is required (use --eab-hmac-key or ACME_EAB_HMAC_KEY)".into(),
+            )),
+        }
+    }
+}
+
+fn resolve_option(value: Option<&str>, env: &str) -> Option<String> {
+    value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            std::env::var(env)
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+}
+
+pub fn load_or_register(
+    config: &Config,
+    email: &str,
+    server: &str,
+    eab: Option<&EabCredentials>,
+    eab_required: bool,
+) -> Result<Account, Error> {
     let account_path = config.account_file_for(server);
     if account_path.exists() {
         return load_file(&account_path);
@@ -24,8 +65,15 @@ pub fn load_or_register(config: &Config, email: &str, server: &str) -> Result<Ac
         return Ok(account);
     }
 
+    if eab_required && eab.is_none() {
+        return Err(Error::Config(format!(
+            "External Account Binding is required to register an account at {server}; \
+             supply --eab-kid and --eab-hmac-key (or ACME_EAB_KID / ACME_EAB_HMAC_KEY)"
+        )));
+    }
+
     let dir = super::directory::fetch(server)?;
-    let account = register(email, &dir.new_nonce, &dir.new_account, server)?;
+    let account = register(email, &dir.new_nonce, &dir.new_account, server, eab)?;
     save(config, &account)?;
     Ok(account)
 }
@@ -98,6 +146,7 @@ fn register(
     nonce_url: &str,
     account_url: &str,
     server: &str,
+    eab: Option<&EabCredentials>,
 ) -> Result<Account, Error> {
     let ak = crypto::generate_p256_key()?;
     let key_b64 = crate::base64::encode_no_pad(&ak.pkcs8_bytes);
@@ -105,10 +154,15 @@ fn register(
 
     let nonce = get_nonce(nonce_url)?;
 
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "termsOfServiceAgreed": true,
         "contact": [format!("mailto:{email}")],
     });
+
+    if let Some(eab) = eab {
+        payload["externalAccountBinding"] =
+            crypto::eab_jws(&ak.jwk, &eab.kid, &eab.hmac_key, account_url)?;
+    }
 
     let jws = crypto::sign_jws(
         &serde_json::to_vec(&payload).unwrap(),

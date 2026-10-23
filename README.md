@@ -202,13 +202,44 @@ for the intermediates.
 
 ### Supported CAs
 
-| CA | Server URL | Flag |
-|----|-----------|------|
-| Let's Encrypt | `https://acme-v02.api.letsencrypt.org/directory` | (default) |
-| Let's Encrypt Staging | `https://acme-staging-v02.api.letsencrypt.org/directory` | `--test` |
+`--ca` is accepted by both `register` and `issue` and selects a built-in ACME CA
+preset. The default remains Let's Encrypt production.
 
-`--server URL` accepts another ACME directory. CAs that require External Account
-Binding (ZeroSSL, Google Public CA, SSL.com) are not supported yet.
+| Preset (`--ca`) | CA | Directory URL | EAB |
+|-----------------|----|---------------|-----|
+| `letsencrypt` | Let's Encrypt | `https://acme-v02.api.letsencrypt.org/directory` | No |
+| `letsencrypt-staging` | Let's Encrypt Staging | `https://acme-staging-v02.api.letsencrypt.org/directory` | No |
+| `zerossl` | ZeroSSL | `https://acme.zerossl.com/v2/DV90` | Yes |
+| `google` | Google Trust Services | `https://dv.acme-v02.api.pki.goog/directory` | Yes |
+| `sslcom` | SSL.com (ECC) | `https://acme.ssl.com/sslcom-dv-ecc` | Yes |
+| `sslcom-rsa` | SSL.com (RSA) | `https://acme.ssl.com/sslcom-dv-rsa` | Yes |
+| `buypass` | Buypass Go | `https://api.buypass.com/acme/directory` | No |
+| `buypass-test` | Buypass Go test | `https://api.test4.buypass.no/acme/directory` | No |
+| `sectigo` | Sectigo | `https://acme.sectigo.com/v2/DV` | Yes |
+
+`--server URL` overrides the preset's directory URL but keeps the preset's EAB
+requirement. A known CA directory passed via `--server` also infers the EAB
+requirement. `--test` still selects Let's Encrypt staging and conflicts with a
+non-Let's Encrypt preset; use `--ca letsencrypt-staging` instead.
+
+ZeroSSL, Google Trust Services, SSL.com, and Sectigo require External Account
+Binding (EAB). Pass the key identifier and HMAC key on the first registration:
+
+```sh
+acmers register --email you@example.com --ca zerossl \
+  --eab-kid 'kid-from-ca-dashboard' \
+  --eab-hmac-key 'hmac-key-from-ca-dashboard'
+```
+
+`ACME_EAB_KID` and `ACME_EAB_HMAC_KEY` provide the same values without putting
+secrets in shell history. EAB is only needed when an account is first created:
+renewals reuse the stored account and do not need it. EAB secrets are never
+written to disk.
+
+Buypass discontinued TLS/SSL certificate issuance in October 2025. Its presets
+remain for existing accounts and test endpoints, but cannot issue new
+certificates; Buypass also issued RSA-only certificates, which acmers does not
+support yet.
 
 ## Migrating from certbot
 

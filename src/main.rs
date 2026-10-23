@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use acmers::acme;
 use acmers::base64;
+use acmers::ca;
 use acmers::cli;
 use acmers::config::{self, Config};
 use acmers::crypto;
@@ -15,9 +16,6 @@ use acmers::lock;
 use acmers::providers;
 use acmers::renewal::RenewalConfig;
 use acmers::storage;
-
-const LE_PRODUCTION: &str = "https://acme-v02.api.letsencrypt.org/directory";
-const LE_STAGING: &str = "https://acme-staging-v02.api.letsencrypt.org/directory";
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -48,8 +46,18 @@ fn run(cmd: cli::Cmd) -> Result<(), Error> {
         cli::Cmd::Register {
             email,
             server,
+            ca,
+            eab_kid,
+            eab_hmac_key,
             test,
-        } => cmd_register(&email, server.as_deref(), test),
+        } => cmd_register(
+            &email,
+            ca.as_deref(),
+            server.as_deref(),
+            test,
+            eab_kid.as_deref(),
+            eab_hmac_key.as_deref(),
+        ),
         cli::Cmd::Cron => cmd_renew(cli::RenewArgs {
             domain: None,
             all: true,
@@ -67,14 +75,6 @@ fn run(cmd: cli::Cmd) -> Result<(), Error> {
         cli::Cmd::Show { domain } => cmd_show(&domain),
         cli::Cmd::ShowAccount { server, test } => cmd_show_account(server.as_deref(), test),
         cli::Cmd::Delete { domain } => cmd_delete(&domain),
-    }
-}
-
-fn resolve_server(explicit: Option<&str>, test: bool) -> String {
-    if test {
-        LE_STAGING.to_string()
-    } else {
-        explicit.unwrap_or(LE_PRODUCTION).to_string()
     }
 }
 
@@ -102,13 +102,19 @@ fn cmd_issue(args: cli::IssueArgs) -> Result<(), Error> {
         args.env_file.as_deref().map(std::path::Path::new),
         &args.env_overrides,
     )?;
-    let server = resolve_server(args.server.as_deref(), args.test);
+    let resolved = ca::resolve(args.ca.as_deref(), args.server.as_deref(), args.test)?;
+    let eab = acme::account::EabCredentials::from_options(
+        args.eab_kid.as_deref(),
+        args.eab_hmac_key.as_deref(),
+    )?;
+    let server = resolved.directory;
     let email = args
         .email
         .ok_or_else(|| Error::Config("email required (use --email)".into()))?;
 
     let mut rc = RenewalConfig::new(args.domains, args.provider, email, server);
-    rc.staging = args.test || rc.server == LE_STAGING;
+    rc.ca = resolved.name.map(|name| name.to_string());
+    rc.staging = args.test || rc.server == ca::staging().directory;
     rc.challenge = if args.standalone {
         "http-01".to_string()
     } else {
@@ -120,7 +126,7 @@ fn cmd_issue(args: cli::IssueArgs) -> Result<(), Error> {
     rc.preferred_chain = args.preferred_chain;
     apply_install(&mut rc, &args.install);
 
-    issue_certificate(&config, &rc, &env_overrides, true)
+    issue_certificate(&config, &rc, &env_overrides, true, eab.as_ref())
 }
 
 fn apply_install(rc: &mut RenewalConfig, install: &cli::InstallOptions) {
@@ -155,6 +161,7 @@ fn issue_certificate(
     rc: &RenewalConfig,
     env_overrides: &HashMap<String, String>,
     persist: bool,
+    eab: Option<&acme::account::EabCredentials>,
 ) -> Result<(), Error> {
     if rc.domains.is_empty() {
         return Err(Error::Config("no domains to issue".into()));
@@ -163,7 +170,9 @@ fn issue_certificate(
         return Err(Error::Config("email required in renewal config".into()));
     }
 
-    let account = acme::account::load_or_register(config, &rc.email, &rc.server)?;
+    let eab_required = ca::eab_required(rc.ca.as_deref(), &rc.server);
+    let account =
+        acme::account::load_or_register(config, &rc.email, &rc.server, eab, eab_required)?;
     let account_key = crypto::load_key_from_der(
         &base64::decode(&account.key_b64)
             .map_err(|e| Error::Config(format!("decode account key: {e}")))?,
@@ -420,16 +429,19 @@ fn cmd_renew(args: cli::RenewArgs) -> Result<(), Error> {
         }
 
         let server = if args.test || args.dry_run {
-            LE_STAGING.to_string()
+            ca::staging().directory.to_string()
         } else if let Some(server) = &args.server {
             server.clone()
         } else if rc.server.is_empty() {
-            LE_PRODUCTION.to_string()
+            ca::default_preset().directory.to_string()
         } else {
             rc.server.clone()
         };
+        if args.test || args.dry_run || args.server.is_some() {
+            rc.ca = None;
+        }
         rc.server = server.clone();
-        rc.staging = server == LE_STAGING;
+        rc.staging = server == ca::staging().directory;
 
         let threshold = args.days.unwrap_or(30);
         let cert_path = config.cert_file(rc.main_domain());
@@ -474,7 +486,7 @@ fn cmd_renew(args: cli::RenewArgs) -> Result<(), Error> {
         }
 
         eprintln!("{}: renewing...", rc.main_domain());
-        match issue_certificate(&config, &rc, &env_overrides, !args.dry_run) {
+        match issue_certificate(&config, &rc, &env_overrides, !args.dry_run, None) {
             Ok(()) => {
                 if args.dry_run {
                     eprintln!("{}: dry run successful", rc.main_domain());
@@ -586,11 +598,28 @@ fn cmd_list_providers() -> Result<(), Error> {
     Ok(())
 }
 
-fn cmd_register(email: &str, server: Option<&str>, test: bool) -> Result<(), Error> {
+fn cmd_register(
+    email: &str,
+    ca_name: Option<&str>,
+    server: Option<&str>,
+    test: bool,
+    eab_kid: Option<&str>,
+    eab_hmac_key: Option<&str>,
+) -> Result<(), Error> {
     let config = Config::load()?;
-    let server = resolve_server(server, test);
-    let account = acme::account::load_or_register(&config, email, &server)?;
-    eprintln!("registered: {} ({server})", account.url);
+    let resolved = ca::resolve(ca_name, server, test)?;
+    let eab = acme::account::EabCredentials::from_options(eab_kid, eab_hmac_key)?;
+    let account = acme::account::load_or_register(
+        &config,
+        email,
+        &resolved.directory,
+        eab.as_ref(),
+        resolved.eab_required,
+    )?;
+    eprintln!("registered: {} ({})", account.url, resolved.directory);
+    if let Some(name) = resolved.name {
+        eprintln!("ca: {name}");
+    }
     Ok(())
 }
 
@@ -623,6 +652,9 @@ fn cmd_show(domain: &str) -> Result<(), Error> {
     println!("provider:  {}", rc.provider);
     println!("email:     {}", rc.email);
     println!("server:    {}", rc.server);
+    if let Some(ca) = &rc.ca {
+        println!("ca:        {ca}");
+    }
     println!("staging:   {}", rc.staging);
     println!("challenge: {}", rc.challenge);
     if let Some(chain) = &rc.preferred_chain {
@@ -644,7 +676,7 @@ fn cmd_show(domain: &str) -> Result<(), Error> {
 
 fn cmd_show_account(server: Option<&str>, test: bool) -> Result<(), Error> {
     let config = Config::load()?;
-    let server = resolve_server(server, test);
+    let server = ca::resolve(None, server, test)?.directory;
     let account = acme::account::load(&config, &server)
         .ok_or_else(|| Error::Config(format!("no account for server {server}")))?;
     println!("url:    {}", account.url);
