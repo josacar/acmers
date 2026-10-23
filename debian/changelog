@@ -1,3 +1,15 @@
+acmers (0.3.0) unstable; urgency=medium
+
+  * Add certbot-compatible certificate layout, SAN-preserving renewal,
+    install paths, deployment hooks, DNS propagation checks, and ARI.
+  * Add per-server accounts, staging isolation, certificate management
+    commands, preferred chains, and renewal locking.
+  * Add certbot-style twice-daily systemd timer, writable service unit,
+    /etc/acmers/env credentials, --env-file, and cron fallback.
+  * Update provider helpers and test coverage.
+
+ -- José Carretero <josacar@users.noreply.github.com>  Fri, 23 Oct 2026 14:53:18 +0200
+
 acmers (0.2.0) unstable; urgency=medium
 
   * Implement 10 provider stubs (Curanet, MyDNS.JP, Linode v3, Online.net,
