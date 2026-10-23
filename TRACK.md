@@ -37,7 +37,7 @@ reload hooks.
   fallback.
 - Exclusive renewal lock with stale-PID recovery.
 
-## Dependencies (8 crates, all Debian-packaged)
+## Dependencies (8 crates)
 
 | Crate | Version | Purpose | Debian |
 |-------|---------|---------|--------|
