@@ -11,11 +11,12 @@ pub struct Directory {
     pub new_authz: Option<String>,
     pub revoke_cert: String,
     pub key_change: String,
+    pub renewal_info: Option<String>,
 }
 
 pub fn fetch(server_url: &str) -> Result<Directory, Error> {
-    let resp = http::get(server_url, &[])
-        .map_err(|e| Error::Config(format!("fetch directory: {e}")))?;
+    let resp =
+        http::get(server_url, &[]).map_err(|e| Error::Config(format!("fetch directory: {e}")))?;
 
     let v: Value = serde_json::from_str(&resp.body)
         .map_err(|e| Error::Json(format!("parse directory: {e}")))?;
@@ -27,5 +28,6 @@ pub fn fetch(server_url: &str) -> Result<Directory, Error> {
         new_authz: j::get_string(&v, &["newAuthz"]).map(|s| s.to_string()),
         revoke_cert: j::get_string_required(&v, &["revokeCert"])?.to_string(),
         key_change: j::get_string_required(&v, &["keyChange"])?.to_string(),
+        renewal_info: j::get_string(&v, &["renewalInfo"]).map(|s| s.to_string()),
     })
 }

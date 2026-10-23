@@ -6,11 +6,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/acmers cron
+ExecStart=/usr/bin/acmers renew --all
+EnvironmentFile=-/etc/acmers/env
 StateDirectory=acmers
-ProtectSystem=strict
-PrivateTmp=yes
+StateDirectoryMode=0750
+PrivateTmp=true
 NoNewPrivileges=yes
-
-[Install]
-WantedBy=multi-user.target

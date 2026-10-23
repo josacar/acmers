@@ -4,9 +4,7 @@ set -e
 case "$1" in
     purge)
         rm -rf /var/lib/acmers
-        if getent passwd _acmers > /dev/null 2>&1; then
-            deluser --system _acmers
-        fi
+        rm -rf /etc/acmers
     ;;
     remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
     ;;

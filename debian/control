@@ -28,3 +28,6 @@ Description: Zero-dependency ACME client with DNS-01 challenge support
  certificate issuance and renewal via the ACME protocol (RFC 8555).
  It supports 200+ DNS providers for DNS-01 challenge validation,
  ported from the acme.sh project.
+ .
+ The package includes a systemd timer and service for unattended
+ twice-daily renewal, plus a cron fallback for hosts without systemd.

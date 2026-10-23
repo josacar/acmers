@@ -1,7 +1,7 @@
-use ring::rand::SystemRandom;
-use ring::signature::{EcdsaKeyPair, ECDSA_P256_SHA256_FIXED_SIGNING, KeyPair as RingKeyPair};
-use serde_json::{json, Value};
 use rcgen::{KeyPair, PKCS_ECDSA_P256_SHA256};
+use ring::rand::SystemRandom;
+use ring::signature::{ECDSA_P256_SHA256_FIXED_SIGNING, EcdsaKeyPair, KeyPair as RingKeyPair};
+use serde_json::{Value, json};
 
 use crate::error::Error;
 
@@ -22,16 +22,18 @@ pub fn generate_p256_key() -> Result<AccountKey, Error> {
         .map_err(|e| Error::Crypto(format!("load P-256 key: {e}")))?;
 
     let (jwk, thumbprint) = jwk_from_public_key(&key_pair);
-    Ok(AccountKey { key_pair, pkcs8_bytes, jwk, jwk_thumbprint: thumbprint })
+    Ok(AccountKey {
+        key_pair,
+        pkcs8_bytes,
+        jwk,
+        jwk_thumbprint: thumbprint,
+    })
 }
 
 pub fn load_key_from_der(der: &[u8]) -> Result<AccountKey, Error> {
     let rng = SystemRandom::new();
-    let key_pair = EcdsaKeyPair::from_pkcs8(
-        &ECDSA_P256_SHA256_FIXED_SIGNING,
-        der,
-        &rng,
-    ).map_err(|e| Error::Crypto(format!("load key: {e}")))?;
+    let key_pair = EcdsaKeyPair::from_pkcs8(&ECDSA_P256_SHA256_FIXED_SIGNING, der, &rng)
+        .map_err(|e| Error::Crypto(format!("load key: {e}")))?;
 
     let (jwk, thumbprint) = jwk_from_public_key(&key_pair);
     Ok(AccountKey {
@@ -104,10 +106,19 @@ pub enum KidOrJwk {
     Jwk(Value),
 }
 
-pub fn create_csr(
-    domains: &[String],
-    key_pkcs8: &[u8],
-) -> Result<Vec<u8>, Error> {
+pub fn pkcs8_to_pem(der: &[u8]) -> String {
+    let encoded = crate::base64::encode_std(der);
+    let mut out = String::with_capacity(encoded.len() + 64);
+    out.push_str("-----BEGIN PRIVATE KEY-----\n");
+    for chunk in encoded.as_bytes().chunks(64) {
+        out.push_str(std::str::from_utf8(chunk).unwrap_or(""));
+        out.push('\n');
+    }
+    out.push_str("-----END PRIVATE KEY-----\n");
+    out
+}
+
+pub fn create_csr(domains: &[String], key_pkcs8: &[u8]) -> Result<Vec<u8>, Error> {
     use rustls_pki_types::PrivatePkcs8KeyDer;
     let pkcs8_der = PrivatePkcs8KeyDer::from(key_pkcs8);
     let key = KeyPair::from_pkcs8_der_and_sign_algo(&pkcs8_der, &PKCS_ECDSA_P256_SHA256)
@@ -121,7 +132,8 @@ pub fn create_csr(
         domains.first().cloned().unwrap_or_default(),
     );
 
-    let csr = params.serialize_request(&key)
+    let csr = params
+        .serialize_request(&key)
         .map_err(|e| Error::Crypto(format!("CSR creation: {e}")))?;
     Ok(csr.der().to_vec())
 }

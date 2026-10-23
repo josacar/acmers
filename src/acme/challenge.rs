@@ -55,14 +55,24 @@ pub fn get_authorizations(
     let mut auths = Vec::new();
     for url in auth_urls {
         let nonce = get_nonce()?;
-        let jws = sign_jws(b"", &key.key_pair, &KidOrJwk::Kid(account_url.to_string()), &nonce, url)?;
+        let jws = sign_jws(
+            b"",
+            &key.key_pair,
+            &KidOrJwk::Kid(account_url.to_string()),
+            &nonce,
+            url,
+        )?;
         let resp = http::post(
             url,
             &serde_json::to_vec(&jws).unwrap(),
             "application/jose+json",
             &[],
         )
-        .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+        .map_err(|e| Error::Acme {
+            status: 0,
+            detail: e,
+            error_type: "http".into(),
+        })?;
 
         check_response(&resp, &format!("get authorization for {url}"))?;
 
@@ -118,7 +128,11 @@ pub fn respond_to_challenge(
         "application/jose+json",
         &[],
     )
-    .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+    .map_err(|e| Error::Acme {
+        status: 0,
+        detail: e,
+        error_type: "http".into(),
+    })?;
 
     check_response(&resp, "respond to challenge")?;
 
@@ -158,9 +172,15 @@ pub fn poll_challenge(
             "application/jose+json",
             &[],
         )
-        .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+        .map_err(|e| Error::Acme {
+            status: 0,
+            detail: e,
+            error_type: "http".into(),
+        })?;
 
-        if resp.status >= 400 { continue; }
+        if resp.status >= 400 {
+            continue;
+        }
 
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("poll challenge: {e}")))?;
@@ -187,32 +207,32 @@ pub fn poll_challenge(
 
 pub fn start_http_challenges(
     challenges: &[(String, String)],
-) -> std::thread::JoinHandle<()> {
+) -> Result<std::thread::JoinHandle<()>, Error> {
     use std::collections::HashMap;
     let map: HashMap<String, String> = challenges.iter().cloned().collect();
-    let listener = std::net::TcpListener::bind("0.0.0.0:80").expect("cannot bind port 80");
-    std::thread::spawn(move || {
-        for stream in listener.incoming() {
-            if let Ok(mut stream) = stream {
-                let mut buf = [0u8; 4096];
-                if let Ok(n) = std::io::Read::read(&mut stream, &mut buf) {
-                    let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
-                    if let Some(line) = req.lines().next() {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        if parts.len() >= 2 {
-                            let path = parts[1];
-                            let token = path.trim_start_matches("/.well-known/acme-challenge/");
-                            if let Some(content) = map.get(token) {
-                                let resp = format!(
-                                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{}",
-                                    content.len(), content
-                                );
-                                let _ = std::io::Write::write_all(&mut stream, resp.as_bytes());
-                            }
+    let listener = std::net::TcpListener::bind("0.0.0.0:80")
+        .map_err(|e| Error::Config(format!("cannot bind port 80 for HTTP-01: {e}")))?;
+    Ok(std::thread::spawn(move || {
+        for mut stream in listener.incoming().flatten() {
+            let mut buf = [0u8; 4096];
+            if let Ok(n) = std::io::Read::read(&mut stream, &mut buf) {
+                let req = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                if let Some(line) = req.lines().next() {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if parts.len() >= 2 {
+                        let path = parts[1];
+                        let token = path.trim_start_matches("/.well-known/acme-challenge/");
+                        if let Some(content) = map.get(token) {
+                            let resp = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n{}",
+                                content.len(),
+                                content
+                            );
+                            let _ = std::io::Write::write_all(&mut stream, resp.as_bytes());
                         }
                     }
                 }
             }
         }
-    })
+    }))
 }

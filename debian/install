@@ -1,4 +1,3 @@
 usr/bin/acmers
 usr/share/man/man1/acmers.1
-lib/systemd/system/acmers.service
-lib/systemd/system/acmers.timer
+etc/acmers/env.example

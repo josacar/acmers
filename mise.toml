@@ -52,7 +52,8 @@ acmers ($VERSION) unstable; urgency=medium
 EOF
 cat debian/changelog >> debian/changelog.new
 mv debian/changelog.new debian/changelog
-git add Cargo.toml debian/changelog
+cargo build
+git add Cargo.toml Cargo.lock debian/changelog
 git commit -m "Bump version to $VERSION"
 git tag v$VERSION
 git push

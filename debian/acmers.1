@@ -1,4 +1,4 @@
-.TH ACMERS 1 "2026-06-12" "acmers 0.1.0" "User Commands"
+.TH ACMERS 1 "2026-10-23" "acmers 0.2.0" "User Commands"
 .SH NAME
 acmers \- zero-dependency ACME client for SSL/TLS certificate automation
 .SH SYNOPSIS
@@ -13,25 +13,73 @@ ported from the acme.sh project.
 Single binary, zero runtime dependencies beyond glibc.
 .SH COMMANDS
 .TP
-\fBregister\fR \-\-email \fIaddr\fR [\-\-test]
-Register a new ACME account. Use \fB--test\fR for staging environment.
+\fBregister\fR \-\-email \fIaddr\fR [\-\-server \fIurl\fR] [\-\-test]
+Register an ACME account. Use \fB--test\fR for staging. Accounts are stored
+per ACME server.
 .TP
-\fBissue\fR \fIdomain\fR... \-\-dns \fIprovider\fR \-\-email \fIaddr\fR [\-\-test] [\-\-dnssleep \fIsecs\fR]
-Issue a certificate for one or more domains using DNS-01 challenge.
+\fBissue\fR \-d \fIdomain\fR... \-\-dns \fIprovider\fR \-\-email \fIaddr\fR [options]
+Issue a certificate for one or more domains using the DNS-01 challenge.
 The \fB--dns\fR flag selects the DNS provider (see \fBlist-providers\fR).
-Use \fB--test\fR for staging, \fB--dnssleep\fR to wait for DNS propagation.
+Use \fB--test\fR for staging and \fB--server\fR for a non-default directory URL.
 .TP
-\fBrenew\fR \fIdomain\fR [\-\-test]
-Renew an existing certificate for the given domain.
+\fBrenew\fR [\-d \fIdomain\fR] [\-\-all] [\-\-force] [\-\-dry-run] [\-\-days \fIn\fR]
+Renew one certificate, or every stored certificate when no domain is given.
+Renewal preserves all subject alternative names and wildcards.
 .TP
-\fBrevoke\fR \fIdomain\fR
-Revoke a certificate for the given domain.
+\fBrevoke\fR \-d \fIdomain\fR [\-\-reason \fIreason\fR] [\-\-delete-after-revoke]
+Revoke a certificate. Reasons: unspecified, keycompromise,
+affiliationchanged, superseded, cessationofoperation, privilegewithdrawn.
 .TP
 \fBlist\-providers\fR
 List all available DNS providers with their required environment variables.
 .TP
 \fBcron\fR
-Run certificate renewal check (designed for cron/systemd timer use).
+Alias for \fBrenew --all\fR, intended for cron and systemd timers.
+.TP
+\fBcertificates\fR
+List stored certificates with their domains and remaining validity.
+.TP
+\fBshow\fR \-d \fIdomain\fR
+Show the stored configuration and expiry for a certificate.
+.TP
+\fBshow\-account\fR [\-\-server \fIurl\fR] [\-\-test]
+Show the active ACME account.
+.TP
+\fBdelete\fR \-d \fIdomain\fR
+Delete a stored certificate and its configuration.
+.SH ISSUE AND RENEW OPTIONS
+.TP
+\fB\-\-cert\-path\fR, \fB\-\-key\-path\fR, \fB\-\-fullchain\-path\fR, \fB\-\-chain\-path\fR \fIfile\fR
+Copy the corresponding artifact to a service path after issuance.
+.TP
+\fB\-\-reloadcmd\fR \fIcommand\fR
+Run a command after installing certificates on an actual renewal.
+.TP
+\fB\-\-deploy\-hook\fR, \fB\-\-pre\-hook\fR, \fB\-\-post\-hook\fR \fIcommand\fR
+Run commands around issuance. Deploy hooks run only when a certificate is
+issued or renewed. Hooks receive \fBRENEWED_LINEAGE\fR and
+\fBRENEWED_DOMAINS\fR.
+.TP
+\fB\-\-dns\-servers\fR \fIip[,ip...]\fR, \fB\-\-dns\-timeout\fR \fIseconds\fR
+Poll DNS resolvers until the challenge TXT record is visible, instead of
+waiting a fixed delay. Default resolvers come from \fI/etc/resolv.conf\fR.
+.TP
+\fB\-\-preferred\-chain\fR \fIissuer\fR
+Select a matching alternate certificate chain when the CA offers one.
+.TP
+\fB\-\-env\-file\fR \fIpath\fR
+Load provider credentials from a file containing \fIKEY=VALUE\fR lines. Blank
+lines and lines beginning with \fB#\fR are ignored, and surrounding quotes are
+removed. Values from \fB-e\fR override the file, which overrides the process
+environment. For example:
+.PP
+.nf
+  CF_Token=your-cloudflare-api-token
+.fi
+.TP
+\fB\-\-dnssleep\fR \fIseconds\fR
+Fixed wait before challenge validation, used as a fallback when propagation
+polling is unavailable.
 .SH DNS PROVIDERS
 acmers supports 200+ DNS providers. Each provider requires specific
 environment variables for authentication. Run \fBacmers list-providers\fR
@@ -56,7 +104,20 @@ Common providers and their environment variables:
 .SH FILES
 .TP
 .I ~/.acmers/
-Configuration and account data directory.
+Per-user configuration and certificate state.
+.TP
+.I /var/lib/acmers/
+System-wide certificate state used when running as root, including the packaged
+systemd service.
+.TP
+.I /etc/acmers/env
+Provider credentials for unattended renewal. Keep this file mode 0600. The
+packaged service loads it automatically, and the cron fallback passes it with
+\fB--env-file\fR.
+.TP
+.I /usr/lib/systemd/system/acmers.timer
+Twice-daily renewal timer, enabled on package installation. The packaged
+timer uses a 12-hour randomized delay and \fBPersistent=true\fR.
 .SH ENVIRONMENT
 All DNS provider credentials are passed via environment variables.
 No credentials are stored on disk beyond the ACME account key.

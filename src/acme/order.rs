@@ -36,7 +36,8 @@ pub fn create_order(
     key: &AccountKey,
     nonce: &str,
 ) -> Result<Order, Error> {
-    let identifiers: Vec<Value> = domains.iter()
+    let identifiers: Vec<Value> = domains
+        .iter()
         .map(|d| serde_json::json!({"type": "dns", "value": d}))
         .collect();
 
@@ -56,12 +57,20 @@ pub fn create_order(
         "application/jose+json",
         &[],
     )
-    .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+    .map_err(|e| Error::Acme {
+        status: 0,
+        detail: e,
+        error_type: "http".into(),
+    })?;
 
     check_response(&resp, "create order")?;
 
-    let v: Value = serde_json::from_str(&resp.body)
-        .map_err(|e| Error::Json(format!("create order: {e} (body: {})", &resp.body[..resp.body.len().min(500)])))?;
+    let v: Value = serde_json::from_str(&resp.body).map_err(|e| {
+        Error::Json(format!(
+            "create order: {e} (body: {})",
+            &resp.body[..resp.body.len().min(500)]
+        ))
+    })?;
 
     let order_url = j::get_string(&v, &["url"])
         .or_else(|| resp.headers.get("location").map(|s| s.as_str()))
@@ -87,7 +96,10 @@ pub fn create_order(
         status,
         expires: j::get_string(&v, &["expires"]).map(|s| s.to_string()),
         identifiers: identifiers_list,
-        authorizations: auths.iter().filter_map(|a| a.as_str().map(|s| s.to_string())).collect(),
+        authorizations: auths
+            .iter()
+            .filter_map(|a| a.as_str().map(|s| s.to_string()))
+            .collect(),
         finalize,
         certificate: cert,
     })
@@ -118,7 +130,11 @@ pub fn finalize_order(
         "application/jose+json",
         &[],
     )
-    .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+    .map_err(|e| Error::Acme {
+        status: 0,
+        detail: e,
+        error_type: "http".into(),
+    })?;
 
     check_response(&resp, "finalize order")?;
 
@@ -165,9 +181,15 @@ pub fn poll_order(
             "application/jose+json",
             &[],
         )
-        .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+        .map_err(|e| Error::Acme {
+            status: 0,
+            detail: e,
+            error_type: "http".into(),
+        })?;
 
-        if resp.status >= 400 { continue; }
+        if resp.status >= 400 {
+            continue;
+        }
 
         let v: Value = serde_json::from_str(&resp.body)
             .map_err(|e| Error::Json(format!("poll order: {e}")))?;
@@ -202,22 +224,147 @@ pub fn download_cert(
     key: &AccountKey,
     get_nonce: &mut dyn FnMut() -> Result<String, Error>,
 ) -> Result<String, Error> {
+    let resp = post_as_get(cert_url, account_url, key, get_nonce)?;
+    check_response(&resp, "download certificate")?;
+    Ok(resp.body)
+}
+
+fn post_as_get(
+    url: &str,
+    account_url: &str,
+    key: &AccountKey,
+    get_nonce: &mut dyn FnMut() -> Result<String, Error>,
+) -> Result<http::Response, Error> {
     let nonce = get_nonce()?;
     let jws = sign_jws(
         b"",
         &key.key_pair,
         &KidOrJwk::Kid(account_url.to_string()),
         &nonce,
-        cert_url,
+        url,
     )?;
-    let resp = http::post(
-        cert_url,
+    http::post(
+        url,
         &serde_json::to_vec(&jws).unwrap(),
         "application/jose+json",
         &[],
     )
-    .map_err(|e| Error::Acme { status: 0, detail: e, error_type: "http".into() })?;
+    .map_err(|e| Error::Acme {
+        status: 0,
+        detail: e,
+        error_type: "http".into(),
+    })
+}
 
+pub fn download_cert_with_preferred(
+    cert_url: &str,
+    preferred_chain: Option<&str>,
+    account_url: &str,
+    key: &AccountKey,
+    get_nonce: &mut dyn FnMut() -> Result<String, Error>,
+) -> Result<String, Error> {
+    let resp = post_as_get(cert_url, account_url, key, get_nonce)?;
     check_response(&resp, "download certificate")?;
+
+    let Some(preferred) = preferred_chain else {
+        return Ok(resp.body);
+    };
+    let preferred = preferred.trim().to_ascii_lowercase();
+    if preferred.is_empty() || chain_matches(&resp.body, &preferred) {
+        return Ok(resp.body);
+    }
+
+    for link in alternate_links(&resp.headers) {
+        let alternate = post_as_get(&link, account_url, key, get_nonce)?;
+        if alternate.status < 400 && chain_matches(&alternate.body, &preferred) {
+            return Ok(alternate.body);
+        }
+    }
+
+    eprintln!("warning: preferred chain '{preferred}' not offered; using default chain");
     Ok(resp.body)
+}
+
+fn alternate_links(headers: &std::collections::HashMap<String, String>) -> Vec<String> {
+    let Some(link) = headers.get("link") else {
+        return Vec::new();
+    };
+    link.split(',')
+        .filter_map(|part| {
+            let start = part.find('<')?;
+            let end = part[start + 1..].find('>')? + start + 1;
+            let url = &part[start + 1..end];
+            if part.to_ascii_lowercase().contains("rel=\"alternate\"") {
+                Some(url.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn chain_matches(pem: &str, preferred: &str) -> bool {
+    let blocks = cert_blocks(pem);
+    let Some(last) = blocks.last() else {
+        return false;
+    };
+    let Some(der) = cert_der(last) else {
+        return false;
+    };
+    issuer_cn(&der)
+        .map(|cn| cn.eq_ignore_ascii_case(preferred))
+        .unwrap_or(false)
+}
+
+fn issuer_cn(der: &[u8]) -> Option<String> {
+    let (_, cert) = x509_parser::parse_x509_certificate(der).ok()?;
+    cert.issuer()
+        .iter_common_name()
+        .next()
+        .and_then(|cn| cn.as_str().ok())
+        .map(|s| s.to_string())
+}
+
+pub struct CertChain {
+    pub leaf: String,
+    pub chain: String,
+    pub fullchain: String,
+}
+
+pub fn split_cert_chain(pem: &str) -> CertChain {
+    let blocks = cert_blocks(pem);
+    let leaf = blocks.first().cloned().unwrap_or_default();
+    let chain = blocks.iter().skip(1).cloned().collect::<Vec<_>>().join("");
+    let fullchain = format!("{leaf}{chain}");
+    CertChain {
+        leaf,
+        chain,
+        fullchain,
+    }
+}
+
+fn cert_blocks(pem: &str) -> Vec<String> {
+    let normalized = pem.replace("\r\n", "\n");
+    let begin = "-----BEGIN CERTIFICATE-----";
+    let end = "-----END CERTIFICATE-----";
+    let mut rest = normalized.as_str();
+    let mut blocks = Vec::new();
+    while let Some(start) = rest.find(begin) {
+        let after = &rest[start..];
+        let Some(end_pos) = after.find(end) else {
+            break;
+        };
+        let block_end = end_pos + end.len();
+        blocks.push(format!("{}\n", &after[..block_end]));
+        rest = &after[block_end..];
+    }
+    blocks
+}
+
+fn cert_der(block: &str) -> Option<Vec<u8>> {
+    let body: String = block
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect();
+    crate::base64::decode_std(&body).ok()
 }

@@ -3,10 +3,8 @@ set -e
 
 case "$1" in
     configure)
-        if ! getent passwd _acmers > /dev/null 2>&1; then
-            adduser --system --no-create-home --group _acmers
-        fi
-        chown -R _acmers:_acmers /var/lib/acmers
+        install -d -m 0750 -o root -g root /var/lib/acmers
+        install -d -m 0700 -o root -g root /etc/acmers
     ;;
     abort-upgrade|abort-remove|abort-deconfigure)
     ;;

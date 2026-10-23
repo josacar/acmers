@@ -42,26 +42,117 @@ acmers register --email you@example.com --test
 
 ```sh
 # Single domain, wildcard, or multi-domain
-acmers issue -d example.com -d '*.example.com' --dns cf
+acmers issue -d example.com -d '*.example.com' --dns cf --email you@example.com
 
 # With provider-specific env vars
 CF_Token=xxx acmers issue -d example.com --dns cf --email you@example.com
 
-# Multi-domain across providers
-acmers issue -d site1.com --dns cf -d site2.com --dns gd
+# Install the certificate and reload nginx after renewal
+acmers issue -d example.com --dns cf --email you@example.com \
+  --fullchain-path /etc/nginx/ssl/example.com/fullchain.pem \
+  --key-path /etc/nginx/ssl/example.com/privkey.pem \
+  --reloadcmd 'systemctl reload nginx'
 ```
+
+Issuance options are stored per certificate, so later renewals reuse the install
+paths and reload command. DNS propagation is checked by polling resolvers; use
+`--dns-servers` and `--dns-timeout` to tune it, or `--dnssleep` as a fallback.
 
 ### Renew a certificate
 
 ```sh
+# One certificate
 acmers renew -d example.com
+
+# Every stored certificate (same as `acmers renew --all`)
+acmers renew
 ```
 
-### Automate with cron
+Renewal preserves all SANs and wildcards. Use `--force` to renew regardless of
+expiry, `--dry-run` to test against staging without deploying, and `--days` to
+change the 30-day renewal window.
+
+### Deploying certificates
+
+`--cert-path`, `--key-path`, `--fullchain-path`, and `--chain-path` copy
+artifacts to the paths your services read. `--reloadcmd` runs after a successful
+renewal; `--deploy-hook` runs after that. Hooks receive `RENEWED_LINEAGE` and
+`RENEWED_DOMAINS`. `--pre-hook` and `--post-hook` run once around a renewal run.
+Deployment and hooks are skipped for skipped certificates, dry runs, and
+staging certificates.
 
 ```sh
-# Add to crontab
-0 0 * * * /usr/local/bin/acmers cron
+acmers renew --all \
+  --pre-hook 'systemctl stop nginx' \
+  --post-hook 'systemctl start nginx'
+```
+
+### Automatic renewal
+
+The Debian package ships a systemd timer and service modeled on certbot:
+
+- `acmers.timer` runs at 00:00 and 12:00 with up to 12 hours of random delay and
+  `Persistent=true`, so a missed run catches up after boot.
+- `acmers.service` runs `/usr/bin/acmers renew --all` as root, with
+  `PrivateTmp=true` and `StateDirectory=acmers`.
+- The timer is enabled automatically on install. The service is static and is
+  started by the timer.
+- On hosts without systemd, `/etc/cron.d/acmers` provides the same twice-daily
+  fallback.
+
+Credentials for unattended DNS renewal are read from `/etc/acmers/env`:
+
+```sh
+sudo install -d -m 0700 /etc/acmers
+sudo install -m 0600 /dev/null /etc/acmers/env
+sudoedit /etc/acmers/env
+```
+
+```sh
+# /etc/acmers/env
+CF_Token=your-cloudflare-api-token
+```
+
+`acmers.service` loads this file automatically. For cron or manual runs use
+`--env-file`:
+
+```sh
+acmers renew --all --env-file /etc/acmers/env
+```
+
+Values from `-e KEY=VALUE` override the file, which overrides the process
+environment.
+
+For a user-level setup without the package, add:
+
+```sh
+0 */12 * * * /usr/local/bin/acmers renew --all --env-file ~/.acmers/env
+```
+
+### Moving an existing user store to the system timer
+
+The packaged service runs as root and uses `/var/lib/acmers`. If certificates
+were issued as a normal user under `~/.acmers`, migrate them once:
+
+```sh
+sudo install -d -m 0750 -o root -g root /var/lib/acmers
+sudo cp -a ~/.acmers/. /var/lib/acmers/
+sudo chown -R root:root /var/lib/acmers
+sudo chmod -R go-rwx /var/lib/acmers
+sudo systemctl start acmers.service
+sudo acmers certificates
+```
+
+The first run imports the legacy `account.json`, treats expired certificates as
+due, and rewrites the old DER `key.pem` as PEM.
+
+### Manage certificates
+
+```sh
+acmers certificates          # list names, domains, and expiry
+acmers show -d example.com   # show stored configuration
+acmers show-account          # show the active ACME account
+acmers delete -d example.com # remove local certificate data
 ```
 
 ### List available providers
@@ -78,24 +169,36 @@ acmers list-providers | head -20
 ### Revoke a certificate
 
 ```sh
-acmers revoke -d example.com
+acmers revoke -d example.com --reason keycompromise
+acmers revoke -d example.com --delete-after-revoke
 ```
 
 ## Configuration
 
-All configuration is via environment variables. Credentials are stored in `~/.acmers/`.
+All provider configuration is via environment variables. Certificate state is
+stored in `~/.acmers/` for user runs and in `/var/lib/acmers/` when running as
+root, including the packaged systemd service. Provider credentials for
+unattended renewal live in `/etc/acmers/env`.
 
 ```
-~/.acmers/
-├── account.json       # ACME account key and URL
+~/.acmers/  (or /var/lib/acmers/)
+├── accounts/
+│   ├── acme-v02.api.letsencrypt.org_directory.json
+│   └── acme-staging-v02.api.letsencrypt.org_directory.json
 ├── example.com/
-│   ├── cert.pem       # Certificate
-│   ├── key.pem        # Private key (PKCS#8 DER)
-│   ├── fullchain.pem  # Full chain
-│   └── renewal.json   # Renewal config (provider, email, server)
+│   ├── cert.pem       # Leaf certificate
+│   ├── chain.pem      # Intermediate certificates
+│   ├── fullchain.pem  # Leaf + intermediates
+│   ├── privkey.pem    # Private key (PKCS#8 PEM, mode 0600)
+│   ├── key.pem        # Same PEM key for backward compatibility
+│   └── renewal.json   # Domains, provider, server, install paths, hooks
 └── other-domain.com/
     └── ...
 ```
+
+**Breaking change:** `key.pem` is now PEM instead of raw DER, and `cert.pem`
+contains only the leaf certificate. Use `privkey.pem` for the key and `chain.pem`
+for the intermediates.
 
 ### Supported CAs
 
@@ -103,9 +206,38 @@ All configuration is via environment variables. Credentials are stored in `~/.ac
 |----|-----------|------|
 | Let's Encrypt | `https://acme-v02.api.letsencrypt.org/directory` | (default) |
 | Let's Encrypt Staging | `https://acme-staging-v02.api.letsencrypt.org/directory` | `--test` |
-| ZeroSSL | `https://acme.zerossl.com/v2/DV90` | `--server URL` |
-| SSL.com | `https://acme.ssl.com/sslcom-dv-ecc` | `--server URL` |
-| Google Public CA | `https://dv.acme-v02.api.pki.goog/directory` | `--server URL` |
+
+`--server URL` accepts another ACME directory. CAs that require External Account
+Binding (ZeroSSL, Google Public CA, SSL.com) are not supported yet.
+
+## Migrating from certbot
+
+`acmers` now produces the file set certbot users expect and can deploy it the
+same way.
+
+| certbot | acmers |
+|---|---|
+| `certbot certonly --dns-... -d example.com` | `acmers issue -d example.com --dns <provider> --email you@example.com` |
+| `certbot renew` | `acmers renew --all` |
+| `certbot renew --dry-run` | `acmers renew --all --dry-run` |
+| `certbot renew --force-renewal` | `acmers renew --all --force` |
+| `certbot revoke --cert-path ...` | `acmers revoke -d example.com --reason keycompromise` |
+| `--cert-path`, `--key-path`, `--fullchain-path` | same flags |
+| `--reloadcmd` | same flag |
+| `--deploy-hook` | same flag |
+| `--pre-hook`, `--post-hook` | same flags |
+| `--preferred-chain` | same flag |
+
+Migration steps:
+
+1. Register an account: `acmers register --email you@example.com`.
+2. Reissue with the same DNS provider and add the install paths and reload
+   command you used with certbot.
+3. Remove the certbot renewal entry and let `acmers renew --all` run from cron
+   or the shipped systemd timer.
+
+The DNS provider name is the acme.sh slug shown by `acmers list-providers`
+(for example `cf` for Cloudflare), not certbot's plugin name.
 
 ## Dependencies
 
@@ -128,19 +260,23 @@ Binary size: ~3.6 MB (release).
 
 ```
 src/
-├── main.rs           CLI dispatch, cron, renew, revoke
+├── main.rs           CLI dispatch, issue, renew, revoke, cron
 ├── cli.rs            Argument parser
-├── crypto.rs         ECDSA keygen, JWS ES256, CSR creation
+├── crypto.rs         ECDSA keygen, JWS ES256, CSR creation, PEM encoding
 ├── http.rs           ureq wrapper (captures error bodies)
 ├── json.rs           serde_json field extraction helpers
 ├── base64.rs         Base64url encode/decode (pure Rust)
 ├── error.rs          Error types
-├── config.rs         ~/.acmers/ directory management
+├── config.rs         ~/.acmers/ paths, atomic writes, permissions
+├── renewal.rs        Renewal configuration and SAN preservation
+├── deploy.rs         Certificate installation and reload hooks
+├── dns.rs            Minimal UDP DNS TXT propagation polling
 ├── acme/
-│   ├── account.rs    Account registration and loading
+│   ├── account.rs    Per-server account registration and loading
+│   ├── ari.rs        ARI (RFC 9773) renewal info
 │   ├── directory.rs  ACME directory discovery
 │   ├── challenge.rs  Authorization, challenge, polling
-│   └── order.rs      Order lifecycle, finalize, cert download
+│   └── order.rs      Order lifecycle, finalize, chain download
 ├── providers/
 │   ├── mod.rs        DnsProvider trait + registry (201 providers)
 │   ├── helpers.rs    Common REST patterns
