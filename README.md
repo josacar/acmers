@@ -14,7 +14,7 @@ dependencies** — no system tools needed. Single binary, no runtime, no surpris
 ```sh
 # Debian/Ubuntu (.deb package)
 # Download from GitHub Releases: https://github.com/josacar/acmers/releases
-sudo dpkg -i acmers_0.2.0_amd64.deb
+sudo dpkg -i acmers_0.3.0_amd64.deb
 
 # Or from crates.io
 cargo install acmers
@@ -212,8 +212,9 @@ Binding (ZeroSSL, Google Public CA, SSL.com) are not supported yet.
 
 ## Migrating from certbot
 
-`acmers` now produces the file set certbot users expect and can deploy it the
-same way.
+`acmers` produces the file set certbot users expect and can deploy it the same
+way. See [docs/MIGRATION.md](docs/MIGRATION.md) for a full Cloudflare DNS-01
+walkthrough, including Caddy and generic service deployment.
 
 | certbot | acmers |
 |---|---|
@@ -228,13 +229,15 @@ same way.
 | `--pre-hook`, `--post-hook` | same flags |
 | `--preferred-chain` | same flag |
 
-Migration steps:
+The short version:
 
-1. Register an account: `acmers register --email you@example.com`.
-2. Reissue with the same DNS provider and add the install paths and reload
-   command you used with certbot.
-3. Remove the certbot renewal entry and let `acmers renew --all` run from cron
-   or the shipped systemd timer.
+1. Reuse the Cloudflare token from certbot's `dns-cloudflare.ini` as
+   `CF_Token` in `/etc/acmers/env`.
+2. Reissue with the apex first and the wildcard second, e.g.
+   `-d example.com -d '*.example.com'`, plus the same install paths and reload
+   command certbot used.
+3. Remove the certbot renewal entry and let `acmers renew --all` run from the
+   shipped systemd timer.
 
 The DNS provider name is the acme.sh slug shown by `acmers list-providers`
 (for example `cf` for Cloudflare), not certbot's plugin name.
@@ -314,10 +317,10 @@ Each provider implements the `DnsProvider` trait with `add_txt` and `remove_txt`
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| **Implemented** | 195 | Full API calls (add/remove TXT records) |
-| **Stub** | 6 | Require external CLI or have no API |
+| **Implemented** | 196 | Full API calls (add/remove TXT records) |
+| **Stub** | 5 | Require external CLI or have no API |
 
-### Implemented Providers (195)
+### Implemented Providers (196)
 
 **Cloud/DNS platforms:** AWS Route53, Google Cloud DNS, Azure DNS, Aliyun, TencentCloud,
 OVH, DNSPod.cn, Yandex Cloud, Cloudflare, DigitalOcean, GoDaddy, Gandi, Porkbun,
@@ -344,7 +347,7 @@ DurableDNS (US), OpenProvider REST (NL), Alwaysdata (FR), Restena (LU),
 Timeweb Cloud (RU), EasyDNS (CA), Arvan (IR), Azion (BR), Sotoon (IR),
 Geoscaling, Alviy, Kinghost (BR), ANX (AT), Area7, Artfiles, Beget, DNSServices
 
-### Stub Providers (6)
+### Stub Providers (5)
 
 These providers return an error with guidance. They require external CLI tools
 or have no DNS management API.
@@ -356,7 +359,6 @@ or have no DNS management API.
 | `knot` | Requires knsupdate CLI | `--dns nsupdate` |
 | `lexicon` | Requires lexicon CLI | Use lexicon CLI directly |
 | `nsd` | Requires nsupdate CLI | `--dns nsupdate` |
-| `samba` | Requires samba-tool CLI | — |
 
 ### Adding a Provider
 

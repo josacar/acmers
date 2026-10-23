@@ -2,7 +2,7 @@
 
 ## Overview
 
-All DNS providers in acmers follow a consistent pattern defined by the `DnsProvider` trait. This spec documents the standard implementation pattern used across all 201 providers.
+All DNS providers in acmers follow a consistent pattern defined by the `DnsProvider` trait. This spec documents the standard implementation pattern used across all 201 registered providers (196 implemented, 5 stubs).
 
 ## Trait Definition
 

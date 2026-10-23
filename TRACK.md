@@ -2,14 +2,37 @@
 
 A minimal-dependency Rust CLI that implements the ACME protocol (RFC 8555) for
 automatic SSL/TLS certificate issuance and renewal, with DNS-01 challenge
-support for all providers from the [acme.sh](https://github.com/acmesh-official/acme.sh) project.
+support for providers ported from the
+[acme.sh](https://github.com/acmesh-official/acme.sh) project.
 
 ## Philosophy
 
 acme.sh is a pure shell script that orchestrates system tools (`curl`, `openssl`).
 `acmers` follows the same spirit: **minimal pure-Rust dependencies** — no async
-runtime, no system tool calls. Every line of HTTP, crypto, and protocol logic
-is in Rust.
+runtime, no system tool calls for crypto/HTTP/DNS. Every line of protocol logic
+is in Rust. The only subprocess execution is user-configured deployment and
+reload hooks.
+
+## Current status (0.3.0)
+
+- ACME order, DNS-01 and standalone HTTP-01 challenges, finalize, and download.
+- Certbot-compatible file set: `cert.pem`, `chain.pem`, `fullchain.pem`,
+  `privkey.pem`, and `key.pem` (PEM).
+- SAN-preserving bulk renewal with `--force`, `--dry-run`, `--days`, and
+  `--keep-until-expiring`.
+- Per-server ACME accounts with staging isolation.
+- Cloudflare DNS-01 migration from certbot documented in
+  [docs/MIGRATION.md](docs/MIGRATION.md).
+- Install paths, reload/deploy/pre/post hooks, and persisted renewal settings.
+- DNS TXT propagation polling over `std::net::UdpSocket`, with `--dns-servers`,
+  `--dns-timeout`, and `--dnssleep` fallback.
+- ARI (RFC 9773) renewal windows and `--preferred-chain`.
+- Certificate management: `certificates`, `show`, `show-account`, `delete`, and
+  `revoke --reason`.
+- Packaged Debian service and timer: twice-daily renewal with a 12-hour
+  randomized delay, `/etc/acmers/env` credentials, and a non-systemd cron
+  fallback.
+- Exclusive renewal lock with stale-PID recovery.
 
 ## Dependencies (8 crates, all Debian-packaged)
 
@@ -19,8 +42,8 @@ is in Rust.
 | `serde_json` | 1.0 | JSON parsing | `librust-serde-json-dev` |
 | `rcgen` | 0.14 | CSR creation, cert params | `librust-rcgen-dev` |
 | `ring` | 0.17 | ECDSA keygen, JWS signing, SHA256 | `librust-ring-dev` |
-| `lexopt` | 0.3 | CLI argument parser (0 transitive deps) | `librust-lexopt-dev` |
-| `time` | 0.3 | Certificate expiry date parsing | transitive only |
+| `lexopt` | 0.3 | CLI argument parser | `librust-lexopt-dev` |
+| `time` | 0.3 | Certificate expiry and ARI timestamps | transitive only |
 | `x509-parser` | 0.18 | X.509 certificate parsing | transitive only |
 | `rustls-pki-types` | 1 | Private key DER types | transitive only |
 
@@ -30,147 +53,153 @@ Transitive total: ~80 crates. Release binary: ~3.6 MB.
 
 ```
 src/
-├── main.rs           (323 lines)  CLI dispatch, cron, renew, revoke
-├── cli.rs            (149 lines)  Manual arg parser (lexopt-free)
-├── crypto.rs         (126 lines)  ring keygen, JWS ES256, rcgen CSR
-├── http.rs           (79 lines)   ureq 3 wrapper (captures error bodies)
-├── json.rs           (50 lines)   serde_json field extraction helpers
-├── base64.rs         (65 lines)   Base64url encode/decode (pure Rust)
-├── error.rs          (44 lines)   Error enum
-├── config.rs         (58 lines)   ~/.acmers/ directory management
+├── main.rs           CLI dispatch, issue, renew, revoke, lifecycle commands
+├── cli.rs            Argument parser
+├── crypto.rs         ECDSA keygen, JWS ES256, CSR, PEM encoding
+├── http.rs           ureq wrapper (captures error bodies)
+├── json.rs           serde_json field extraction helpers
+├── base64.rs         Base64url encode/decode
+├── error.rs          Error types
+├── config.rs         Paths, atomic writes, permissions
+├── renewal.rs        Renewal configuration and SAN preservation
+├── deploy.rs         Install paths and reload/deploy hooks
+├── dns.rs            UDP DNS TXT propagation polling
+├── envfile.rs        KEY=VALUE credential file loading
+├── lock.rs           Exclusive renewal lock
+├── storage.rs        Certificate file set output
 ├── acme/
-│   ├── account.rs    (109 lines)  Account registration and loading
-│   ├── directory.rs  (31 lines)   ACME directory discovery
-│   ├── challenge.rs  (159 lines)  Authorization, challenge, polling
-│   ├── order.rs      (207 lines)  Order lifecycle, finalize, cert download
-│   └── mod.rs
-├── providers/
-│   ├── helpers.rs    (170 lines)  Common REST patterns for providers
-│   ├── cf.rs         (117 lines)  Cloudflare (fully implemented)
-│   ├── dp.rs         (stub)       DNSPod.cn
-│   ├── gd.rs         (stub)       GoDaddy
-│   ├── aws.rs        (stub)       AWS Route53
-│   ├── ...           (198 more provider files)
-│   └── mod.rs        (~620 lines) DnsProvider trait + registry (201 entries)
+│   ├── account.rs    Per-server account registration and loading
+│   ├── ari.rs        ARI (RFC 9773) renewal info
+│   ├── directory.rs  ACME directory discovery
+│   ├── challenge.rs  Authorization, challenge, polling
+│   └── order.rs      Order lifecycle, finalize, chain download
+└── providers/
+    ├── helpers.rs    Common REST patterns
+    ├── mod.rs        DnsProvider trait + registry (201 entries)
+    └── *.rs          Individual provider implementations
 ```
 
-## ACME Protocol Flow (working, tested with LE staging)
+## ACME protocol flow
 
-1. `register --email user@domain.tld` → creates account, stores `~/.acmers/account.json`
-2. `issue -d example.com --dns cf` → creates order, DNS-01 challenge, CSR, downloads cert
-3. `renew -d example.com` → reads renewal config, re-issues cert
-4. `revoke -d example.com` → sends revocation to ACME server
-5. `cron` → scans `~/.acmers/*/` for expiring certs, auto-renews
+1. `register --email user@domain.tld` creates an account per server.
+2. `issue -d example.com -d '*.example.com' --dns cf --email ...` creates an
+   order, solves DNS-01, finalizes the CSR, and downloads the chain.
+3. `renew -d example.com` rereads `renewal.json` and renews every SAN.
+4. `renew --all` renews every stored certificate that is due.
+5. `revoke -d example.com --reason keycompromise` revokes and optionally
+   deletes local state.
+6. `cron` is an alias for `renew --all`.
 
-### JWS Signing (ES256)
-- Account key: ECDSA P-256 generated via `ring`
-- JWK thumbprint: `base64url(sha256(canonical_jwk_json))`
-- JWS: `{"protected": "...", "payload": "...", "signature": "..."}`
-- Signature: P1363 format (raw R||S, 64 bytes)
+### JWS signing (ES256)
 
-## Provider Status
+- Account key: ECDSA P-256 generated via `ring`.
+- JWK thumbprint: `base64url(sha256(canonical_jwk_json))`.
+- Signature: P1363 raw R||S, 64 bytes.
+
+## Certificate and state layout
+
+```
+~/.acmers/                    # per-user runs
+/var/lib/acmers/              # root and packaged service
+├── accounts/
+│   └── <server>.json
+└── <name>/
+    ├── cert.pem              # leaf
+    ├── chain.pem             # intermediates
+    ├── fullchain.pem         # leaf + intermediates
+    ├── privkey.pem           # PKCS#8 PEM, mode 0600
+    ├── key.pem               # same PEM for compatibility
+    └── renewal.json          # domains, server, install paths, hooks
+
+/etc/acmers/env               # CF_Token etc. for unattended renewal
+```
+
+## Provider status
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| **Implemented** | 165 | Full add_txt/remove_txt with real API calls |
-| **Error stubs** | 36 | Return proper error messages (no silent no-ops) |
-| **Coverage** | 100% | All 201 acme.sh providers accounted for |
+| **Implemented** | 196 | Full `add_txt`/`remove_txt` with real API calls |
+| **Stub** | 5 | Require external CLI tools or have no API |
 | **Total** | 201 | All acme.sh providers accounted for |
 
-### Provider Tiers (for implementation order)
+Stubs: `df`, `hetzner`, `knot`, `lexicon`, `nsd`.
 
-| Tier | Count | Examples | Complexity |
-|------|-------|----------|------------|
-| Simple REST | ~85 | DigitalOcean, Gandi, DNSimple, Porkbun | 30 lines each |
-| XML-RPC/SOAP | ~8 | INWX, autoDNS, PleskXML | 80 lines each |
-| Login+scrape | ~5 | FreeDNS, Hurricane Electric, cyon.ch | 100 lines each |
-| DNS protocol | ~4 | nsupdate, Knot, NSD | 80 lines each |
-| Custom | ~28 | Lexicon (delegation), myapi | Varies |
+Two providers do not use `http::` but are fully implemented: `nsupdate`
+(DNS UPDATE over UDP/TCP) and `maradns` (zone file manipulation).
 
-## CLI Usage
+## CLI usage
 
 ```
 acmers <command> [options]
 
 Commands:
   issue           Issue a new certificate
-  renew           Renew a certificate
+  renew           Renew one or all certificates
   revoke          Revoke a certificate
-  list-providers  List supported DNS providers
   register        Register ACME account
-  cron            Run renewal checks
+  list-providers  List supported DNS providers
+  cron            Renew all certificates (alias for renew --all)
+  certificates    List stored certificates
+  show            Show certificate details
+  show-account    Show the active ACME account
+  delete          Delete a stored certificate
 
 Examples:
   acmers register --email user@example.com
-  acmers issue -d example.com -d '*.example.com' --dns cf
+  acmers issue -d example.com -d '*.example.com' --dns cf --email user@example.com
   acmers renew -d example.com
-  acmers list-providers
-  acmers cron
+  acmers renew --all --dry-run --env-file /etc/acmers/env
+  acmers revoke -d example.com --reason keycompromise
+  acmers certificates
 ```
 
-## Work Plan
+Issue/renew deployment flags: `--cert-path`, `--key-path`, `--fullchain-path`,
+`--chain-path`, `--reloadcmd`, `--deploy-hook`, `--pre-hook`, `--post-hook`,
+`--preferred-chain`, `--dns-servers`, `--dns-timeout`, `--env-file`.
 
-### Sprint 1 — Foundation  [DONE]
-- [x] Project scaffold, Cargo.toml with 8 deps
-- [x] CLI parser, error types, base64, JSON helpers
-- [x] HTTP client (ureq 3 wrapper with error body capture)
-- [x] Crypto: ECDSA P-256 keygen, JWS ES256 signing, CSR creation
-- [x] ACME protocol: directory, nonce, account, order, challenge
-- [x] Config storage: `~/.acmers/`
-- [x] Cloudflare provider (full implementation)
-- [x] Build and test against Let's Encrypt staging
+## Completed work
 
-### Sprint 2 — Provider Infrastructure  [DONE]
-- [x] `helpers.rs` — shared REST patterns (zone lookup, record CRUD)
-- [x] All 201 provider stub files
-- [x] Static registry with all providers
-- [ ] Implement Batch 1: Simple REST providers (~85)
+- [x] ACME directory, nonce, account, order, challenge, finalize, download.
+- [x] ECDSA P-256 account and certificate keys, ES256 JWS.
+- [x] 196 DNS providers implemented from the acme.sh registry.
+- [x] Certbot-compatible certificate and key files.
+- [x] SAN-preserving renewal, bulk renewal, dry runs, and ARI.
+- [x] Per-server accounts and staging isolation.
+- [x] Install paths, reload/deploy/pre/post hooks.
+- [x] DNS propagation polling and Cloudflare migration guide.
+- [x] Certificate management and revocation reasons.
+- [x] Debian package with systemd timer, env file, and cron fallback.
+- [x] Renewal locking and stale-lock recovery.
 
-### ### Sprint 3 — Remaining Providers
-- [ ] Implement Batch 2: XML-RPC/SOAP providers (~8)
-- [ ] Implement Batch 3: Login+scrape providers (~5)
-- [ ] Implement Batch 4: DNS protocol providers (~4)
-- [ ] Implement Batch 5: Custom providers (~28)
+## Remaining gaps / non-goals
 
-### ### Sprint 4 — Polish
-- [ ] Standalone modes (HTTP-01, TLS-ALPN-01)
-- [ ] Deploy hooks (`--install-cert --reloadcmd`)
-- [ ] Notification system (email, webhook)
-- [ ] ECDSA/RSA key selection (`--keylength`)
-- [ ] Multi-domain wildcard + SAN
-- [ ] ARI (RFC 9773) renewal info
-- [ ] Self-update (`--upgrade`)
-- [ ] Install mode (`--install`)
+- Webroot, nginx, and apache plugins.
+- TLS-ALPN-01.
+- RSA and P-384 certificate keys.
+- External Account Binding (ZeroSSL, Google Public CA, SSL.com).
+- Importing certbot's ACME account or `/etc/letsencrypt` state.
+- Notifications (email/webhook) and log rotation.
+- User-level systemd timers.
 
-## Future Refactors
+## Future refactors
 
-1. **Generic REST provider base** — 85+ providers follow identical REST patterns;
-   create a `RestProvider` struct that providers configure with base URL and auth header
-2. **Provider plugin system** — load providers from `.so`/`.dylib` to avoid monolithic binary
-3. **Mock DNS test harness** — test providers without hitting real APIs
-4. **Encrypted credential store** — `acmers.toml` with age/sops encryption
-5. **Provider code-gen from OpenAPI specs** — many providers publish Swagger specs
-6. **Parallel multi-domain issuance** — issue certs for multiple domains concurrently
-7. **DNS propagation health checker** — query multiple resolvers to verify TXT records
-8. **Full ACME client replacement** — drop-in compatible with acme.sh config
-9. **WebAssembly build target** — edge/serverless ACME challenge responses
-10. **Docker image** — official Docker image with auto-renewal
+1. Generic REST provider base for the many identical REST implementations.
+2. Provider plugin system for a smaller monolithic binary.
+3. Authoritative-nameserver DNS propagation checks instead of relying on
+   recursive resolvers.
+4. Parallel multi-domain issuance.
+5. Encrypted credential store.
 
 ## Verification
 
 ```sh
-# Registration works:
-$ acmers register --email user@example.org --test
-registered: https://acme-staging-v02.api.letsencrypt.org/acme/acct/...
-
-# Provider listing works:
-$ acmers list-providers | wc -l
-201
-
-# Build: clean
-$ cargo build --release
-Finished release [optimized] target(s) in 0.10s
+mise run check
+mise run providers
+cargo test
+./target/debug/acmers list-providers | wc -l
 ```
+
+`list-providers` prints a header plus 201 provider lines.
 
 ## License
 

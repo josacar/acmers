@@ -6,7 +6,7 @@ This file provides instructions for AI agents working on the `acmers` codebase.
 
 - **No new dependencies** unless absolutely necessary and available as `librust-*-dev` in Debian
 - **No async runtime** — everything is synchronous (ureq is blocking)
-- **No system tool calls** (no `curl`, `openssl`, `dig`) — everything is pure Rust
+- **No system tool calls** (no `curl`, `openssl`, `dig`) — everything is pure Rust. The only intentional subprocess execution is user-configured deployment/reload hooks (`--reloadcmd`, `--deploy-hook`).
 - **All providers must implement `DnsProvider`** and be registered in `src/providers/mod.rs`
 
 ## Development Tools
@@ -250,11 +250,15 @@ let token = j::get_string_required(&v, &["token"])?.to_string();
 # Build
 cargo build
 
-# Run tests
+# Run all tests (109 tests as of 0.3.0)
 cargo test
 
-# Integration test against LE staging
-cargo test --test integration
+# Focused integration tests
+cargo test --test certbot_parity
+cargo test --test acme_mock
+
+# Format, lint, and test
+mise run check
 
 # Check for unused code
 cargo build 2>&1 | grep warning
@@ -266,10 +270,10 @@ There are **201 provider files** in `src/providers/`, all registered in `src/pro
 
 | Status | Count | Description |
 |--------|-------|-------------|
-| **Implemented** | 195 | Full API calls via `http::` functions or native protocols |
-| **Stub** | 6 | Require external CLI tools or have no API |
+| **Implemented** | 196 | Full API calls via `http::` functions or native protocols |
+| **Stub** | 5 | Require external CLI tools or have no API |
 
-### Stub providers (6)
+### Stub providers (5)
 
 Stubs are ~28-line files with no HTTP calls. They return `Err(Error::Provider(...))` from `add_txt`
 with a message directing users to an alternative. The remaining stubs all require external CLI tools
@@ -282,7 +286,6 @@ or have no DNS management API:
 | `knot` | Requires knsupdate CLI | `--dns nsupdate` |
 | `lexicon` | Requires lexicon Python CLI | Use lexicon CLI directly |
 | `nsd` | Requires nsupdate CLI | `--dns nsupdate` |
-| `samba` | Requires samba-tool CLI | — |
 
 ### Non-HTTP providers (real implementations)
 
@@ -302,15 +305,38 @@ A stub provider file:
 
 | File | Purpose |
 |------|---------|
-| `src/main.rs` | CLI entry point, command dispatch |
+| `src/main.rs` | CLI dispatch, issue/renew/revoke, lifecycle commands |
 | `src/cli.rs` | Argument parser |
-| `src/crypto.rs` | Key generation, JWS signing, CSR |
+| `src/crypto.rs` | Key generation, JWS signing, CSR, PEM encoding |
 | `src/http.rs` | HTTP client (ureq wrapper) |
 | `src/json.rs` | JSON field extraction helpers |
 | `src/base64.rs` | Base64url encode/decode |
 | `src/error.rs` | Error type definitions |
-| `src/config.rs` | Filesystem config (~/.acmers/) |
-| `src/acme/*.rs` | ACME protocol implementation |
+| `src/config.rs` | Filesystem paths, atomic writes, permissions |
+| `src/renewal.rs` | Renewal configuration and SAN preservation |
+| `src/deploy.rs` | Install paths, reload/deploy hooks |
+| `src/dns.rs` | UDP DNS TXT propagation polling |
+| `src/envfile.rs` | `KEY=VALUE` credential file loading |
+| `src/lock.rs` | Exclusive renewal lock with stale-PID recovery |
+| `src/storage.rs` | Certificate file set output |
+| `src/acme/account.rs` | Per-server account registration and loading |
+| `src/acme/ari.rs` | ARI (RFC 9773) renewal info |
+| `src/acme/directory.rs` | ACME directory discovery |
+| `src/acme/challenge.rs` | Authorization, challenge, polling |
+| `src/acme/order.rs` | Order lifecycle, finalize, chain download |
 | `src/providers/mod.rs` | Provider trait + registry |
 | `src/providers/helpers.rs` | Common REST helpers |
 | `src/providers/*.rs` | Individual provider implementations |
+| `debian/acmers.service` | Packaged renewal service |
+| `debian/acmers.timer` | Twice-daily renewal timer |
+| `debian/acmers.cron.d` | Non-systemd cron fallback |
+
+### Runtime layout
+
+| Path | Purpose |
+|------|---------|
+| `~/.acmers/` | Per-user state (default for non-root runs) |
+| `/var/lib/acmers/` | System state used by root and the packaged service |
+| `/etc/acmers/env` | Provider credentials for unattended renewal (mode 0600) |
+| `/var/lib/acmers/accounts/` | ACME accounts keyed by server |
+| `/var/lib/acmers/<name>/` | Certificate files and `renewal.json` |

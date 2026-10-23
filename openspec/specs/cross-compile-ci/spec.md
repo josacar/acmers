@@ -1,40 +1,57 @@
-# Cross-Compile CI
+# Multi-Arch CI
 
 ## Purpose
 
-GitHub Actions workflows for cross-compiling acmers to amd64 and arm64 targets, building `.deb` packages, and publishing them to GitHub Releases on tag push.
+GitHub Actions workflows that build and test acmers on native amd64 and arm64
+runners, assemble `.deb` packages, and publish them to GitHub Releases on tag
+push. No cross-compilation toolchain is required.
+
+The capability retains its historical `cross-compile-ci` directory name; the
+workflows now use native arm64 runners instead of cross-compilation.
 
 ## Requirements
 
-### Requirement: Cross-compile release workflow
-A GitHub Actions workflow SHALL exist that, on tag push matching `v*`, builds release binaries for amd64 and arm64, assembles `.deb` packages, and attaches them to the GitHub Release.
+### Requirement: CI test job
+The CI workflow SHALL run on every push and pull request and SHALL build the release binary and run the full test suite.
 
-#### Scenario: Workflow triggers on version tag
-- **WHEN** a git tag matching `v*` is pushed (e.g., `v0.2.0`)
-- **THEN** the release workflow SHALL execute
+#### Scenario: Push triggers tests
+- **WHEN** a commit is pushed to any branch
+- **THEN** `cargo build --release` and `cargo test` SHALL run on `ubuntu-latest`
 
-#### Scenario: Workflow builds both architectures
-- **WHEN** the release workflow runs
-- **THEN** it SHALL produce a release binary for `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`
-
-#### Scenario: Workflow produces .deb artifacts
-- **WHEN** the release workflow completes successfully
-- **THEN** `.deb` files for amd64 and arm64 SHALL be attached to the GitHub Release
-
-### Requirement: Cross-compile CI testing
-The CI workflow SHALL verify that both amd64 and arm64 targets compile successfully on every PR and push to main.
-
-#### Scenario: PR triggers cross-compile check
+#### Scenario: Pull request triggers tests
 - **WHEN** a pull request is opened or updated
-- **THEN** the CI workflow SHALL attempt to build for both `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu`
+- **THEN** the same test job SHALL run
 
-#### Scenario: Build failure blocks merge
-- **WHEN** cross-compilation for any target fails
-- **THEN** the CI check SHALL report failure
+### Requirement: Native multi-arch package builds
+The CI and release workflows SHALL build `.deb` packages on native amd64 and arm64 runners using a matrix.
 
-### Requirement: ARM cross-compilation toolchain
-The CI workflow SHALL install the `gcc-aarch64-linux-gnu` package to support cross-compilation of the `ring` crate for arm64.
+#### Scenario: amd64 package
+- **WHEN** the build matrix runs on `ubuntu-latest`
+- **THEN** `dpkg-buildpackage` SHALL produce an amd64 `.deb`
 
-#### Scenario: ARM toolchain configured
-- **WHEN** the CI job for arm64 runs
-- **THEN** the `CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER` environment variable SHALL point to the `aarch64-linux-gnu-gcc` linker
+#### Scenario: arm64 package
+- **WHEN** the build matrix runs on `ubuntu-24.04-arm`
+- **THEN** `dpkg-buildpackage` SHALL produce an arm64 `.deb`
+
+#### Scenario: No cross toolchain
+- **WHEN** the workflow is inspected
+- **THEN** it SHALL NOT require `gcc-aarch64-linux-gnu` or a cross linker
+
+### Requirement: Build artifacts
+Each build job SHALL upload its `.deb` as a workflow artifact.
+
+#### Scenario: Artifacts uploaded
+- **WHEN** a build job completes successfully
+- **THEN** its `.deb` SHALL be available as an `acmers-<arch>` artifact
+
+### Requirement: Release on tag
+The release workflow SHALL trigger on tags matching `v*`, download both architecture artifacts, and attach them to the GitHub Release.
+
+#### Scenario: Version tag
+- **WHEN** a tag such as `v0.3.0` is pushed
+- **THEN** the release workflow SHALL build both architectures
+- **AND** attach `acmers_<version>_amd64.deb` and `acmers_<version>_arm64.deb` to the release
+
+#### Scenario: Release requires both builds
+- **WHEN** either architecture build fails
+- **THEN** the release job SHALL NOT publish
