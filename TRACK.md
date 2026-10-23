@@ -13,7 +13,7 @@ runtime, no system tool calls for crypto/HTTP/DNS. Every line of protocol logic
 is in Rust. The only subprocess execution is user-configured deployment and
 reload hooks.
 
-## Current status (0.3.0)
+## Current status (0.4.0)
 
 - ACME order, DNS-01 and standalone HTTP-01 challenges, finalize, and download.
 - Certbot-compatible file set: `cert.pem`, `chain.pem`, `fullchain.pem`,

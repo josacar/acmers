@@ -84,5 +84,5 @@ The package SHALL create `/etc/acmers` with mode `0700` and `/var/lib/acmers` wi
 The `.deb` package version SHALL be derived from the `version` field in `Cargo.toml`, and `debian/changelog` SHALL contain a matching entry at release time.
 
 #### Scenario: Version matches Cargo.toml
-- **WHEN** `Cargo.toml` version is `0.3.0`
-- **THEN** the built `.deb` SHALL have version `0.3.0`
+- **WHEN** `Cargo.toml` version is `0.4.0`
+- **THEN** the built `.deb` SHALL have version `0.4.0`

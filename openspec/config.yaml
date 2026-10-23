@@ -11,7 +11,7 @@ context: |
     - Match Debian ureq feature flags for packaging compatibility
     - TXT records must always be cleaned up, even on errors
   Domain: ACME certificate lifecycle, DNS-01 validation, and 200+ DNS providers
-  Current state: acmers 0.3.0, 201 providers (196 implemented, 5 stubs), CA presets with EAB registration, 135 tests passing, zero warnings
+  Current state: acmers 0.4.0, 201 providers (196 implemented, 5 stubs), CA presets with EAB registration, 135 tests passing, zero warnings
   Layout: ~/.acmers for users, /var/lib/acmers for root, /etc/acmers/env for unattended credentials
   Packaging: debhelper/dpkg-buildpackage, systemd acmers.timer + acmers.service, /etc/cron.d/acmers fallback
   Docs: README, docs/MIGRATION.md, docs/PROVIDERS.md, debian/acmers.1

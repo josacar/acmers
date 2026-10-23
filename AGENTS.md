@@ -20,7 +20,7 @@ mise run lint           # cargo clippy --all-targets --all-features -- -D warnin
 mise run format         # cargo fmt --all
 mise run check          # format-check + lint + test (runs all three)
 mise run providers      # Count implemented vs stub providers
-mise run release 0.3.0  # Bump version, tag, and push (triggers GitHub Actions)
+mise run release 0.4.0  # Bump version, tag, and push (triggers GitHub Actions)
 ```
 
 Run `mise tasks` to see all available tasks. All tasks are defined in `mise.toml`.
@@ -250,7 +250,7 @@ let token = j::get_string_required(&v, &["token"])?.to_string();
 # Build
 cargo build
 
-# Run all tests (135 tests as of 0.3.0)
+# Run all tests (135 tests as of 0.4.0)
 cargo test
 
 # Focused integration tests

@@ -26,8 +26,8 @@ acmers uses the same token under the name `CF_Token` and the provider slug
 ## 2. Install acmers and the credentials
 
 ```sh
-sudo dpkg -i acmers_0.3.0_amd64.deb      # amd64
-# sudo dpkg -i acmers_0.3.0_arm64.deb    # arm64
+sudo dpkg -i acmers_0.4.0_amd64.deb      # amd64
+# sudo dpkg -i acmers_0.4.0_arm64.deb    # arm64
 
 sudo install -d -m 0700 /etc/acmers
 sudo install -m 0600 /dev/null /etc/acmers/env

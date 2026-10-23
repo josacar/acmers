@@ -48,7 +48,7 @@ Each build job SHALL upload its `.deb` as a workflow artifact.
 The release workflow SHALL trigger on tags matching `v*`, download both architecture artifacts, and attach them to the GitHub Release.
 
 #### Scenario: Version tag
-- **WHEN** a tag such as `v0.3.0` is pushed
+- **WHEN** a tag such as `v0.4.0` is pushed
 - **THEN** the release workflow SHALL build both architectures
 - **AND** attach `acmers_<version>_amd64.deb` and `acmers_<version>_arm64.deb` to the release
 

@@ -14,7 +14,7 @@ dependencies** — no system tools needed. Single binary, no runtime, no surpris
 ```sh
 # Debian/Ubuntu (.deb package)
 # Download from GitHub Releases: https://github.com/josacar/acmers/releases
-sudo dpkg -i acmers_0.3.0_amd64.deb
+sudo dpkg -i acmers_0.4.0_amd64.deb
 
 # Or from crates.io
 cargo install acmers
@@ -467,8 +467,8 @@ mise run github-releases    # List all releases
 mise run github-release     # View latest release
 
 # Release management
-mise run release 0.3.0      # Bump version, tag, and push
-mise run release-dry 0.3.0  # Show what release would do
+mise run release 0.4.0      # Bump version, tag, and push
+mise run release-dry 0.4.0  # Show what release would do
 
 # Documentation
 mise run doc                # Build and open Rust documentation

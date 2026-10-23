@@ -1,3 +1,15 @@
+acmers (0.4.0) unstable; urgency=medium
+
+  * Add External Account Binding (EAB) for ACME account registration.
+  * Add CA presets for ZeroSSL, Google Trust Services, SSL.com (ECC/RSA),
+    Buypass, and Sectigo, plus --ca, --eab-kid, --eab-hmac-key, and
+    ACME_EAB_KID / ACME_EAB_HMAC_KEY.
+  * Persist the selected CA in renewal.json and show it in 'acmers show'.
+  * Document EAB, CA presets, and the Buypass discontinuation.
+  * Update docs and openspec for 0.4.0.
+
+ -- José Carretero <josacar@users.noreply.github.com>  Fri, 23 Oct 2026 16:48:31 +0200
+
 acmers (0.3.0) unstable; urgency=medium
 
   * Add certbot-compatible certificate layout, SAN-preserving renewal,
